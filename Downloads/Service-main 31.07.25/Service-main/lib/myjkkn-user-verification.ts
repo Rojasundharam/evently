@@ -3,7 +3,7 @@
  * Verifies if a logged-in user exists in MyJKKN's staff or student lists
  */
 
-import { myJKKNApi } from './myjkkn-api';
+import { myJkknApi } from './myjkkn-api';
 import type { StaffData, StudentData, PaginatedResponse } from './myjkkn-api';
 
 export interface UserVerificationResult {
@@ -93,7 +93,7 @@ class MyJKKNUserVerificationService {
     
     while (page <= this.MAX_PAGES_TO_SEARCH) {
       try {
-        const response = await myJKKNApi.getStaff(page, 50); // Get 50 per page for efficiency
+        const response = await myJkknApi.getStaff(page, 50); // Get 50 per page for efficiency
         
         if (!response.success || !response.data) {
           throw new Error(response.error || 'Failed to fetch staff data');
@@ -149,7 +149,7 @@ class MyJKKNUserVerificationService {
     
     while (page <= this.MAX_PAGES_TO_SEARCH) {
       try {
-        const response = await myJKKNApi.getStudents(page, 50); // Get 50 per page for efficiency
+        const response = await myJkknApi.getStudents(page, 50); // Get 50 per page for efficiency
         
         if (!response.success || !response.data) {
           throw new Error(response.error || 'Failed to fetch student data');
@@ -210,7 +210,7 @@ class MyJKKNUserVerificationService {
       console.log(`🔍 Searching by name: ${fullName}`);
 
       // Search staff by name
-      const staffResponse = await myJKKNApi.searchStaff(fullName, 1, 20);
+      const staffResponse = await myJkknApi.searchStaff(fullName, 1, 20);
       if (staffResponse.success && staffResponse.data?.data.length > 0) {
         const staff = staffResponse.data.data[0];
         return {
@@ -221,7 +221,7 @@ class MyJKKNUserVerificationService {
       }
 
       // Search students by name
-      const studentResponse = await myJKKNApi.searchStudents(fullName, 1, 20);
+      const studentResponse = await myJkknApi.searchStudents(fullName, 1, 20);
       if (studentResponse.success && studentResponse.data?.data.length > 0) {
         const student = studentResponse.data.data[0];
         return {
