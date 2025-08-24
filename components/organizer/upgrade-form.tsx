@@ -8,7 +8,18 @@ import { Building2, MapPin, Phone, Mail, Globe, Users, FileText } from 'lucide-r
 
 interface OrganizerUpgradeFormProps {
   user: User
-  currentProfile: any
+  currentProfile: {
+    full_name?: string
+    phone?: string
+    bio?: string
+    website?: string
+    company_name?: string
+    address?: string
+    city?: string
+    state?: string
+    country?: string
+    postal_code?: string
+  }
 }
 
 export default function OrganizerUpgradeForm({ user, currentProfile }: OrganizerUpgradeFormProps) {
@@ -346,7 +357,7 @@ export default function OrganizerUpgradeForm({ user, currentProfile }: Organizer
       </button>
 
       <p className="text-sm text-gray-500 text-center">
-        Your organizer application will be reviewed by our team. You'll receive an email confirmation once approved.
+        Your organizer application will be reviewed by our team. You&apos;ll receive an email confirmation once approved.
       </p>
     </form>
   )

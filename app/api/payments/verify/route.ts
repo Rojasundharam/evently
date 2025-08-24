@@ -180,7 +180,16 @@ export async function POST(request: NextRequest) {
 }
 
 // Helper function to generate tickets for a booking
-async function generateTicketsForBooking(supabase: any, booking: any) {
+interface Booking {
+  id: string
+  quantity: number
+  events: {
+    id: string
+    title: string
+  }
+}
+
+async function generateTicketsForBooking(supabase: ReturnType<typeof createClient>, booking: Booking) {
   const tickets = []
   
   // Generate tickets based on quantity

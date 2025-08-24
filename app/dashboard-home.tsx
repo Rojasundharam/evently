@@ -51,7 +51,11 @@ interface RecentBooking {
 }
 
 export default function DashboardHome() {
-  const [user, setUser] = useState<any>(null)
+  interface User {
+    id: string
+    email?: string
+  }
+  const [user, setUser] = useState<User | null>(null)
   const [userRole, setUserRole] = useState<string>('user')
   const [stats, setStats] = useState<DashboardStats>({
     totalEvents: 0,

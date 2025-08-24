@@ -150,7 +150,7 @@ export default async function ModernBookingsPage() {
                 </div>
                 <h3 className="text-2xl font-semibold text-gray-900 mb-4">No bookings yet</h3>
                 <p className="text-gray-600 mb-8">
-                  You haven't booked any events yet. Start exploring amazing events near you!
+                  You haven&apos;t booked any events yet. Start exploring amazing events near you!
                 </p>
                 <Link
                   href="/events"

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Filter, Calendar, User, CreditCard, Eye, Download } from 'lucide-react'
+import { Search, CreditCard, Eye, Download } from 'lucide-react'
 import { formatPrice } from '@/lib/utils'
 
 interface Payment {
@@ -232,8 +232,8 @@ export default function AdminPaymentsClient({ payments }: AdminPaymentsClientPro
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <p className="text-sm text-gray-600">
           Showing <span className="font-medium">{filteredPayments.length}</span> of <span className="font-medium">{payments.length}</span> payments
-          {searchTerm && <span> matching "<span className="font-medium">{searchTerm}</span>"</span>}
-          {statusFilter !== 'all' && <span> with status "<span className="font-medium">{statusFilter}</span>"</span>}
+          {searchTerm && <span> matching &quot;<span className="font-medium">{searchTerm}</span>&quot;</span>}
+          {statusFilter !== 'all' && <span> with status &quot;<span className="font-medium">{statusFilter}</span>&quot;</span>}
           {eventFilter !== 'all' && <span> for selected event</span>}
         </p>
       </div>

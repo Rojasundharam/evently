@@ -11,10 +11,8 @@ import {
   AlertCircle, 
   User, 
   Ticket,
-  Calendar,
   Clock,
   ArrowLeft,
-  Users,
   Scan
 } from 'lucide-react'
 import Link from 'next/link'
@@ -39,7 +37,15 @@ export default function ScanTicketsPage() {
   const eventId = params.id as string
   const [isScanning, setIsScanning] = useState(false)
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
-  const [event, setEvent] = useState<any>(null)
+  interface EventData {
+    id: string
+    title: string
+    date: string
+    time: string
+    venue: string
+    location: string
+  }
+  const [event, setEvent] = useState<EventData | null>(null)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [loading, setLoading] = useState(true)
   const [manualCode, setManualCode] = useState('')
@@ -63,6 +69,7 @@ export default function ScanTicketsPage() {
         scannerRef.current.stop().catch(console.error)
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId])
 
   const checkAuthorization = async () => {

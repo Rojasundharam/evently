@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { CreditCard, TrendingUp, AlertCircle, CheckCircle, Search, Filter, Download, Calendar, User, DollarSign } from 'lucide-react'
+import { CreditCard, TrendingUp, AlertCircle, CheckCircle, Filter, Download } from 'lucide-react'
 import { formatPrice } from '@/lib/utils'
 import AdminPaymentsClient from './admin-payments-client'
 
@@ -20,7 +20,7 @@ async function getAdminPaymentData() {
     .eq('id', user.id)
     .single()
 
-  if (profileError || !profile || (profile as any).role !== 'admin') {
+  if (profileError || !profile || profile.role !== 'admin') {
     redirect('/events')
   }
 
@@ -58,10 +58,10 @@ async function getAdminPaymentData() {
   // Calculate stats
   const stats = {
     total: payments?.length || 0,
-    completed: payments?.filter((p: any) => p.status === 'captured').length || 0,
-    failed: payments?.filter((p: any) => p.status === 'failed').length || 0,
-    pending: payments?.filter((p: any) => p.status === 'created' || p.status === 'pending').length || 0,
-    totalRevenue: payments?.filter((p: any) => p.status === 'captured').reduce((sum: number, p: any) => sum + p.amount, 0) || 0
+    completed: payments?.filter(p => p.status === 'captured').length || 0,
+    failed: payments?.filter(p => p.status === 'failed').length || 0,
+    pending: payments?.filter(p => p.status === 'created' || p.status === 'pending').length || 0,
+    totalRevenue: payments?.filter(p => p.status === 'captured').reduce((sum, p) => sum + p.amount, 0) || 0
   }
 
   return { payments: payments || [], stats }
@@ -163,7 +163,7 @@ export default async function MobileAdminPaymentsPage() {
         </div>
 
         {/* Interactive Client Component */}
-        <AdminPaymentsClient initialPayments={payments} initialStats={stats} />
+        <AdminPaymentsClient payments={payments} />
       </div>
     </div>
   )

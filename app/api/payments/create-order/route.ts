@@ -70,12 +70,12 @@ export async function POST(request: NextRequest) {
       const razorpay = getRazorpayInstance()
       order = await razorpay.orders.create(options)
       console.log('Razorpay order created:', order)
-    } catch (razorpayError: any) {
+    } catch (razorpayError) {
       console.error('Razorpay API Error:', razorpayError)
       return NextResponse.json(
         { 
           error: 'Failed to create payment order', 
-          details: razorpayError.error?.description || razorpayError.message 
+          details: (razorpayError as Error).message 
         },
         { status: 400 }
       )

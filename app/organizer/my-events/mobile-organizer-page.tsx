@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Calendar, Users, TrendingUp, Plus, Search, Filter, BarChart3, Clock, MapPin, Eye } from 'lucide-react'
+import { Calendar, Users, TrendingUp, Plus, Clock, MapPin } from 'lucide-react'
 import { formatDate, formatPrice } from '@/lib/utils'
 import MyEventsClient from './my-events-client'
 
@@ -20,7 +20,7 @@ async function getOrganizerData() {
     .eq('id', user.id)
     .single()
 
-  if (profileError || !profile || ((profile as any).role !== 'organizer' && (profile as any).role !== 'admin')) {
+  if (profileError || !profile || (profile.role !== 'organizer' && profile.role !== 'admin')) {
     redirect('/profile/upgrade-to-organizer')
   }
 

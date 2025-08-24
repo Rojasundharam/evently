@@ -1,16 +1,41 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Download, CheckCircle, Ticket, Calendar, Clock, MapPin, User, Mail, Phone, Sparkles } from 'lucide-react'
-import Image from 'next/image'
+import { X, Download, CheckCircle, Ticket, Calendar, Clock, MapPin, Sparkles, User, Mail, Phone } from 'lucide-react'
 import confetti from 'canvas-confetti'
+
+interface Ticket {
+  id: string
+  ticket_number: string
+  status: string
+  qr_code_image?: string
+}
+
+interface Event {
+  id: string
+  title: string
+  date: string
+  time: string
+  venue: string
+  location: string
+  price: number
+}
+
+interface Booking {
+  id: string
+  user_name: string
+  user_email: string
+  user_phone?: string
+  quantity: number
+  total_amount: number
+}
 
 interface TicketPopupProps {
   isOpen: boolean
   onClose: () => void
-  tickets: any[]
-  event: any
-  booking: any
+  tickets: Ticket[]
+  event: Event
+  booking: Booking
 }
 
 export default function TicketPopup({ isOpen, onClose, tickets, event, booking }: TicketPopupProps) {
@@ -28,7 +53,7 @@ export default function TicketPopup({ isOpen, onClose, tickets, event, booking }
         return Math.random() * (max - min) + min
       }
 
-      const interval: any = setInterval(function() {
+      const interval = setInterval(function() {
         const timeLeft = animationEnd - Date.now()
 
         if (timeLeft <= 0) {
@@ -61,7 +86,7 @@ export default function TicketPopup({ isOpen, onClose, tickets, event, booking }
 
   const currentTicket = tickets[currentTicketIndex]
 
-  const downloadTicket = (ticket: any) => {
+  const downloadTicket = (ticket: Ticket) => {
     if (!ticket.qr_code_image) return
     
     const link = document.createElement('a')
