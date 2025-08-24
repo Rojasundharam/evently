@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Search, Filter, Calendar, Users, IndianRupee, Eye, Edit, MoreHorizontal } from 'lucide-react'
+import { Search, Calendar, IndianRupee, Eye, Edit, MoreHorizontal } from 'lucide-react'
 import { formatDate, formatPrice } from '@/lib/utils'
 
 interface Event {
@@ -223,7 +223,7 @@ export default function MyEventsClient({ events }: MyEventsClientProps) {
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Payment Analytics</h3>
         <div className="text-sm text-gray-600">
           <p>💡 <strong>Tip:</strong> Click on any event above to view detailed payment information and booking history.</p>
-          <p className="mt-2">Use the "Payments" section in the sidebar to view all payment transactions across your events.</p>
+          <p className="mt-2">Use the &quot;Payments&quot; section in the sidebar to view all payment transactions across your events.</p>
         </div>
       </div>
     </div>

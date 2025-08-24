@@ -6,15 +6,12 @@ import {
   Calendar, 
   Ticket, 
   TrendingUp, 
-  Users, 
   Plus,
   ArrowRight,
   Clock,
   MapPin,
-  Star,
   Bell,
   Search,
-  Filter,
   Sparkles
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'

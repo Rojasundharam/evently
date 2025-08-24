@@ -5,7 +5,7 @@ import { Calendar, MapPin, Users, Search, AlertCircle, X, Clock, Star, Filter } 
 import { useSearchParams } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { User } from '@supabase/supabase-js'
+
 import { formatDate, formatTime, formatPrice } from '@/lib/utils'
 
 interface Event {
@@ -29,7 +29,7 @@ interface Event {
 
 export default function ModernEventsPage() {
   const searchParams = useSearchParams()
-  const [user, setUser] = useState<User | null>(null)
+
   const [showMessage, setShowMessage] = useState(false)
   const [message, setMessage] = useState('')
   const [events, setEvents] = useState<Event[]>([])
@@ -194,7 +194,7 @@ export default function ModernEventsPage() {
                 {searchTerm && (
                   <span className="flex items-center gap-2">
                     <Search className="h-4 w-4" />
-                    Searching for "{searchTerm}"
+                    Searching for &quot;{searchTerm}&quot;
                   </span>
                 )}
                 {selectedCategory !== 'all' && (

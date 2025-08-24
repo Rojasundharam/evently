@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Calendar, Users, TrendingUp, Plus, Clock, MapPin } from 'lucide-react'
-import { formatDate, formatPrice } from '@/lib/utils'
+import { Calendar, Users, TrendingUp, Plus, Search, Filter, BarChart3, Eye } from 'lucide-react'
+import { formatPrice } from '@/lib/utils'
 import MyEventsClient from './my-events-client'
 
 async function getOrganizerData() {
