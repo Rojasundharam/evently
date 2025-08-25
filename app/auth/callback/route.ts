@@ -8,15 +8,27 @@ export async function GET(request: Request) {
   const redirectTo = requestUrl.searchParams.get('redirectTo') || '/'
   const origin = requestUrl.origin
 
-  if (code) {
+  console.log('🔄 OAuth callback - processing request')
+  console.log('📍 Request URL:', requestUrl.toString())
+  console.log('🔑 Code received:', code ? 'Yes' : 'No')
+  console.log('🏠 Origin:', origin)
+  console.log('➡️ Redirect to:', redirectTo)
+
+  if (!code) {
+    console.error('❌ No authorization code received')
+    return NextResponse.redirect(`${origin}/auth/sign-in?error=no_code`)
+  }
+
+  try {
     const supabase = await createClient()
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-    
     console.log('🔄 OAuth callback - exchanging code for session')
+    
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     
     if (error) {
       console.error('❌ OAuth exchange error:', error)
-      return NextResponse.redirect(`${origin}/auth/sign-in?error=oauth_error`)
+      console.error('❌ Error details:', JSON.stringify(error, null, 2))
+      return NextResponse.redirect(`${origin}/auth/sign-in?error=oauth_exchange_failed`)
     }
     
     if (data?.user) {
@@ -54,8 +66,13 @@ export async function GET(request: Request) {
         console.log('👤 Existing profile found with role:', existingProfile)
       }
     }
-  }
 
-  // URL to redirect to after sign in process completes
-  return NextResponse.redirect(`${origin}${redirectTo}`)
+    // URL to redirect to after sign in process completes
+    console.log('✅ OAuth callback complete, redirecting to:', `${origin}${redirectTo}`)
+    return NextResponse.redirect(`${origin}${redirectTo}`)
+    
+  } catch (error) {
+    console.error('❌ Unexpected error in OAuth callback:', error)
+    return NextResponse.redirect(`${origin}/auth/sign-in?error=callback_error`)
+  }
 }
