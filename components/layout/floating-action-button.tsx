@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { Plus, X, Calendar, Ticket, QrCode, Sparkles, Zap, Star } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { User } from '@supabase/supabase-js'
 
 const fabActions = [
   { 
@@ -31,10 +33,33 @@ const fabActions = [
 export default function FloatingActionButton() {
   const [isExpanded, setIsExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const fabRef = useRef<HTMLDivElement>(null)
+  const supabase = createClient()
 
   useEffect(() => {
     setMounted(true)
+    
+    // Check user authentication
+    const checkUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        setUser(user)
+      } catch (error) {
+        console.error('Error checking user:', error)
+        setUser(null)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    checkUser()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+      setIsLoading(false)
+    })
     
     const handleClickOutside = (event: MouseEvent) => {
       if (fabRef.current && !fabRef.current.contains(event.target as Node)) {
@@ -47,9 +72,15 @@ export default function FloatingActionButton() {
     }
 
     return () => {
+      subscription.unsubscribe()
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [isExpanded])
+  }, [isExpanded, supabase])
+
+  // Don't show FAB if user is not authenticated or loading
+  if (isLoading || !user) {
+    return null
+  }
 
   return (
     <>

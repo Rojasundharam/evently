@@ -24,7 +24,7 @@ export default function QRTestPage() {
         eventDate: new Date().toISOString()
       }
       
-      const encrypted = encryptTicketData(sampleTicket)
+      const encrypted = await encryptTicketData(sampleTicket)
       setEncryptedData(encrypted)
       setTestData(JSON.stringify(sampleTicket, null, 2))
     } catch (err) {
@@ -42,7 +42,7 @@ export default function QRTestPage() {
       setError('')
       const { decryptTicketData } = await import('@/lib/qr-generator')
       
-      const decrypted = decryptTicketData(encryptedData)
+      const decrypted = await decryptTicketData(encryptedData)
       if (decrypted) {
         setDecryptedData(JSON.stringify(decrypted, null, 2))
       } else {
@@ -63,7 +63,7 @@ export default function QRTestPage() {
       setError('')
       const { decryptTicketData } = await import('@/lib/qr-generator')
       
-      const decrypted = decryptTicketData(testData.trim())
+      const decrypted = await decryptTicketData(testData.trim())
       if (decrypted) {
         setDecryptedData(JSON.stringify(decrypted, null, 2))
       } else {

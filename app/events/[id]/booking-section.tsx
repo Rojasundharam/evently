@@ -249,25 +249,75 @@ export default function BookingSection({
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Number of tickets
             </label>
-            <select
-              value={quantity}
-              onChange={(e) => setQuantity(parseInt(e.target.value))}
-              disabled={isFullyBooked}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0b6d41]"
-            >
-              {[...Array(Math.min(10, availableSeats))].map((_, i) => (
-                <option key={i + 1} value={i + 1}>
-                  {i + 1} {i === 0 ? 'ticket' : 'tickets'}
-                </option>
-              ))}
-            </select>
+            
+            {/* Enhanced quantity selector with buttons */}
+            <div className="flex items-center gap-3 mb-2">
+              <button
+                type="button"
+                onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                disabled={isFullyBooked || quantity <= 1}
+                className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                -
+              </button>
+              
+              <div className="flex-1">
+                <select
+                  value={quantity}
+                  onChange={(e) => setQuantity(parseInt(e.target.value))}
+                  disabled={isFullyBooked}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0b6d41] text-center font-medium"
+                >
+                  {[...Array(Math.min(20, availableSeats))].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1} {i === 0 ? 'ticket' : 'tickets'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => setQuantity(Math.min(Math.min(20, availableSeats), quantity + 1))}
+                disabled={isFullyBooked || quantity >= Math.min(20, availableSeats)}
+                className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                +
+              </button>
+            </div>
+            
+            {/* Helpful text */}
+            <div className="text-xs text-gray-500 space-y-1">
+              <p>• Maximum 20 tickets per booking</p>
+              {availableSeats < 20 && (
+                <p>• Only {availableSeats} seats available</p>
+              )}
+              {quantity > 1 && (
+                <p>• Each ticket will have a unique QR code</p>
+              )}
+              {quantity >= 10 && (
+                <p className="text-blue-600 font-medium">🎉 Group booking discount may apply!</p>
+              )}
+            </div>
           </div>
 
-          {event.price > 0 && quantity > 1 && (
-            <div className="mb-4 p-3 bg-gray-50 rounded-md">
-              <div className="flex justify-between text-sm">
-                <span>Subtotal ({quantity} tickets)</span>
-                <span className="font-semibold">{formatPrice(event.price * quantity)}</span>
+          {quantity > 1 && (
+            <div className="mb-4 p-3 bg-gradient-to-r from-blue-50 to-green-50 rounded-md border border-blue-200">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Price per ticket</span>
+                  <span>{event.price === 0 ? 'Free' : formatPrice(event.price)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Quantity</span>
+                  <span>{quantity} tickets</span>
+                </div>
+                <div className="border-t border-blue-200 pt-2 flex justify-between font-semibold">
+                  <span>Total Amount</span>
+                  <span className="text-[#0b6d41]">
+                    {event.price === 0 ? 'Free' : formatPrice(event.price * quantity)}
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -286,7 +336,31 @@ export default function BookingSection({
         </>
       ) : (
         <form onSubmit={handlePayment} className="space-y-4">
-          <h3 className="text-lg font-semibold mb-4">Booking Details</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Booking Details</h3>
+            <div className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+              {quantity} {quantity === 1 ? 'ticket' : 'tickets'}
+            </div>
+          </div>
+          
+          {/* Booking Summary */}
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+            <h4 className="font-medium text-blue-900 mb-2">Booking Summary</h4>
+            <div className="space-y-1 text-sm text-blue-800">
+              <div className="flex justify-between">
+                <span>Event:</span>
+                <span className="font-medium">{event.title}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Tickets:</span>
+                <span>{quantity} × {event.price === 0 ? 'Free' : formatPrice(event.price)}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-blue-200 pt-1">
+                <span>Total:</span>
+                <span>{event.price === 0 ? 'Free' : formatPrice(event.price * quantity)}</span>
+              </div>
+            </div>
+          </div>
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">

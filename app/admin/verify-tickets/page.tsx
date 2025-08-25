@@ -7,6 +7,9 @@ import { QrCode, Search, CheckCircle, XCircle, AlertCircle, Clock, User, Ticket 
 interface VerificationResult {
   success: boolean
   message: string
+  result?: string
+  alreadyScanned?: boolean
+  scanId?: string
   ticket?: {
     id: string
     ticket_number: string
@@ -16,6 +19,21 @@ interface VerificationResult {
     event_title?: string
     event_date?: string
     checked_in_at?: string
+  }
+  qrCode?: {
+    id: string
+    type: string
+    description?: string
+    createdAt: string
+  }
+  scanDetails?: {
+    scannedAt: string
+    scannedBy: string
+    scanCount: number
+  }
+  previousScan?: {
+    scannedAt: string
+    scanMessage: string
   }
 }
 
@@ -39,7 +57,64 @@ export default function VerifyTicketsPage() {
     setResult(null)
 
     try {
-      // Try multiple verification methods
+      // First, try the new QR verification API for QR codes
+      const isLikelyQRData = ticketInput.length > 50 || ticketInput.includes('://') || ticketInput.startsWith('eyJ')
+      
+      if (isLikelyQRData) {
+        console.log('Attempting QR verification via new API...')
+        
+        try {
+          const qrVerifyResponse = await fetch('/api/qr-verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              qrData: ticketInput.trim(),
+              deviceInfo: {
+                user_agent: navigator.userAgent,
+                timestamp: new Date().toISOString(),
+                page: 'verify-tickets'
+              }
+            }),
+          })
+
+          const qrVerifyResult = await qrVerifyResponse.json()
+          
+          if (qrVerifyResponse.ok) {
+            console.log('QR verification result:', qrVerifyResult)
+            
+            // Format the result for display
+            let displayMessage = qrVerifyResult.message
+            
+            if (qrVerifyResult.alreadyScanned && qrVerifyResult.previousScan) {
+              displayMessage = `❌ Already Scanned!\n\nThis QR code was previously scanned on ${new Date(qrVerifyResult.previousScan.scannedAt).toLocaleString()}\n\n${qrVerifyResult.message}`
+            } else if (qrVerifyResult.success) {
+              displayMessage = `✅ QR Code Verified!\n\n${qrVerifyResult.message}\n\nScan Count: ${qrVerifyResult.scanDetails?.scanCount || 1}`
+            }
+            
+            setResult({
+              success: qrVerifyResult.success,
+              message: displayMessage,
+              result: qrVerifyResult.result,
+              alreadyScanned: qrVerifyResult.alreadyScanned,
+              scanId: qrVerifyResult.scanId,
+              qrCode: qrVerifyResult.qrCode,
+              scanDetails: qrVerifyResult.scanDetails,
+              previousScan: qrVerifyResult.previousScan
+            })
+            
+            return
+          } else {
+            console.log('QR verification failed, falling back to legacy methods:', qrVerifyResult.error)
+          }
+        } catch (qrError) {
+          console.log('QR verification API error, falling back to legacy methods:', qrError)
+        }
+      }
+
+      // Fallback to legacy ticket verification methods
+      console.log('Using legacy ticket verification methods...')
       let ticket: any = null
       
       // Method 1: Direct ticket number lookup
@@ -132,7 +207,99 @@ export default function VerifyTicketsPage() {
         }
       }
 
-      // Method 4: Try qr-code decryption (legacy compatibility)
+      // Method 4: Try printed ticket lookup by ticket code
+      if (!ticket) {
+        try {
+          const { data: printedTicket } = await supabase
+            .from('printed_tickets')
+            .select(`
+              *,
+              events (
+                title,
+                date,
+                time,
+                venue
+              )
+            `)
+            .eq('ticket_code', ticketInput.trim())
+            .single() as { data: any }
+
+          if (printedTicket) {
+            console.log('Found printed ticket:', printedTicket.ticket_code)
+            // Convert printed ticket to standard ticket format
+            ticket = {
+              id: printedTicket.id,
+              ticket_number: printedTicket.ticket_code,
+              status: printedTicket.status === 'used' ? 'used' : 'valid',
+              checked_in_at: printedTicket.used_at,
+              event_id: printedTicket.event_id,
+              bookings: {
+                user_name: 'Printed Ticket Holder',
+                user_email: 'N/A',
+                events: printedTicket.events
+              },
+              ticket_type: 'printed',
+              _isPrintedTicket: true,
+              _printedTicketData: printedTicket
+            }
+          }
+        } catch (error) {
+          console.log('Printed ticket lookup failed:', error instanceof Error ? error.message : String(error))
+        }
+      }
+
+      // Method 5: Try QR code decryption for printed tickets
+      if (!ticket) {
+        try {
+          // Try to decrypt QR code and check if it's a printed ticket
+          let qrData = null
+          
+          try {
+            qrData = decryptTicketDataSync(ticketInput.trim())
+          } catch (syncError) {
+            qrData = await decryptTicketData(ticketInput.trim())
+          }
+          
+          if (qrData && qrData.ticketType === 'printed') {
+            console.log('Successfully decrypted printed ticket QR code:', qrData.ticketNumber)
+            const { data: printedTicket } = await supabase
+              .from('printed_tickets')
+              .select(`
+                *,
+                events (
+                  title,
+                  date,
+                  time,
+                  venue
+                )
+              `)
+              .eq('ticket_code', qrData.ticketNumber)
+              .single() as { data: any }
+
+            if (printedTicket) {
+              ticket = {
+                id: printedTicket.id,
+                ticket_number: printedTicket.ticket_code,
+                status: printedTicket.status === 'used' ? 'used' : 'valid',
+                checked_in_at: printedTicket.used_at,
+                event_id: printedTicket.event_id,
+                bookings: {
+                  user_name: 'Printed Ticket Holder',
+                  user_email: 'N/A',
+                  events: printedTicket.events
+                },
+                ticket_type: 'printed',
+                _isPrintedTicket: true,
+                _printedTicketData: printedTicket
+              }
+            }
+          }
+        } catch (error) {
+          console.log('Printed ticket QR decryption failed:', error instanceof Error ? error.message : String(error))
+        }
+      }
+
+      // Method 6: Try qr-code decryption (legacy compatibility)
       if (!ticket) {
         try {
           const { decryptQRData } = await import('@/lib/qr-code')
@@ -167,6 +334,94 @@ export default function VerifyTicketsPage() {
       }
 
       if (ticket) {
+        // Handle printed ticket verification
+        if (ticket._isPrintedTicket) {
+          const printedTicket = ticket._printedTicketData
+          
+          if (printedTicket.status === 'used') {
+            setResult({
+              success: false,
+              message: `❌ Already Scanned!\n\nThis printed ticket was already used on ${new Date(printedTicket.used_at).toLocaleString()}`,
+              ticket: {
+                id: ticket.id,
+                ticket_number: ticket.ticket_number,
+                status: 'used',
+                customer_name: 'Printed Ticket Holder',
+                customer_email: 'N/A',
+                event_title: ticket.bookings?.events?.title,
+                event_date: ticket.bookings?.events?.date,
+                checked_in_at: printedTicket.used_at
+              }
+            })
+          } else if (printedTicket.status === 'cancelled') {
+            setResult({
+              success: false,
+              message: 'This printed ticket has been cancelled',
+              ticket: {
+                id: ticket.id,
+                ticket_number: ticket.ticket_number,
+                status: 'cancelled',
+                customer_name: 'Printed Ticket Holder',
+                customer_email: 'N/A',
+                event_title: ticket.bookings?.events?.title,
+                event_date: ticket.bookings?.events?.date
+              }
+            })
+          } else {
+            // Mark printed ticket as used
+            try {
+              const { data: { user } } = await supabase.auth.getUser()
+              const { error: updateError } = await supabase
+                .from('printed_tickets')
+                .update({
+                  status: 'used',
+                  used_at: new Date().toISOString(),
+                  scanned_by: user?.id
+                } as any)
+                .eq('id', printedTicket.id)
+
+              if (updateError) {
+                console.error('Error updating printed ticket:', updateError)
+              }
+
+              // Log the scan
+              await supabase
+                .from('printed_ticket_scans')
+                .insert({
+                  printed_ticket_id: printedTicket.id,
+                  event_id: printedTicket.event_id,
+                  scanned_by: user?.id,
+                  scan_result: 'success',
+                  device_info: {
+                    user_agent: navigator.userAgent,
+                    timestamp: new Date().toISOString()
+                  }
+                } as any)
+
+              setResult({
+                success: true,
+                message: `✅ Printed Ticket Verified!\n\nTicket Code: ${printedTicket.ticket_code}\nEvent: ${ticket.bookings?.events?.title}`,
+                ticket: {
+                  id: ticket.id,
+                  ticket_number: ticket.ticket_number,
+                  status: 'used',
+                  customer_name: 'Printed Ticket Holder',
+                  customer_email: 'N/A',
+                  event_title: ticket.bookings?.events?.title,
+                  event_date: ticket.bookings?.events?.date,
+                  checked_in_at: new Date().toISOString()
+                }
+              })
+            } catch (error) {
+              console.error('Error processing printed ticket:', error)
+              setResult({
+                success: false,
+                message: 'Error processing printed ticket verification'
+              })
+            }
+          }
+        } else {
+          // Handle regular ticket verification (existing logic)
         setResult({
           success: true,
           message: `Ticket found and verified successfully`,
@@ -181,6 +436,7 @@ export default function VerifyTicketsPage() {
             checked_in_at: ticket.checked_in_at
           }
         })
+        }
       } else {
         setResult({
           success: false,

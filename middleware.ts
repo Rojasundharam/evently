@@ -27,8 +27,37 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // This will refresh session if expired - required for Server Components
-  await supabase.auth.getUser()
+  // Get the current user session
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  // Define public paths that don't require authentication
+  const publicPaths = [
+    '/auth/sign-in',
+    '/auth/signin',
+    '/auth/callback',
+    '/api/auth',
+  ]
+  
+  // Check if current path is public
+  const isPublicPath = publicPaths.some(path => 
+    request.nextUrl.pathname === path || 
+    request.nextUrl.pathname.startsWith('/api/auth') ||
+    request.nextUrl.pathname.startsWith('/_next') ||
+    request.nextUrl.pathname.includes('.')
+  )
+  
+  // If user is not authenticated and trying to access protected route
+  if (!user && !isPublicPath) {
+    const redirectUrl = new URL('/auth/sign-in', request.url)
+    // Add the current path as redirectTo parameter
+    redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
+    return NextResponse.redirect(redirectUrl)
+  }
+  
+  // If user is authenticated and trying to access sign-in page, redirect to home
+  if (user && request.nextUrl.pathname.startsWith('/auth/sign-in')) {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
 
   return supabaseResponse
 }

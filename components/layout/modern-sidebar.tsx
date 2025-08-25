@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { 
   Home, 
   Calendar, 
@@ -18,18 +19,17 @@ import {
   ChevronDown,
   Mail,
   LogOut,
-  CheckCircle
+  CheckCircle,
+  Printer
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 
-// Navigation items for different user types
-const guestNavigation = [
-  { name: 'Home', href: '/', icon: Home },
-  { name: 'Events', href: '/events', icon: Calendar },
-]
+// Dynamically import sign-in page to avoid circular dependencies
+const SignInPage = dynamic(() => import('@/app/auth/sign-in/page'), { ssr: false })
 
+// Navigation items for different user types
 const userNavigation = [
   { name: 'Home', href: '/', icon: Home },
   { name: 'Events', href: '/events', icon: Calendar },
@@ -42,10 +42,11 @@ const organizerNavigation = [
 ]
 
 const adminNavigation = [
-  { name: 'Admin Users', href: '/admin/users', icon: Users },
+  { name: 'User Management', href: '/admin/users', icon: Users },
   { name: 'Admin Payments', href: '/admin/payments', icon: CreditCard },
   { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
   { name: 'Verify Tickets', href: '/admin/verify-tickets', icon: CheckCircle },
+  { name: 'Generate Printed QR', href: '/admin/generate-printed-qr', icon: Printer },
 ]
 
 interface ModernSidebarProps {
@@ -58,114 +59,440 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [mounted, setMounted] = useState(false)
   const [user, setUser] = useState<User | null>(null)
-  const [userRole, setUserRole] = useState<string | null>(null)
+  const [userRole, setUserRole] = useState<string>('user')
   const [isLoading, setIsLoading] = useState(true)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const supabase = createClient()
+  
+  // Add supabase to window for debugging
+  if (typeof window !== 'undefined') {
+    (window as any).supabase = supabase
+  }
 
   useEffect(() => {
     setMounted(true)
+    let loadingTimeout: NodeJS.Timeout
     
     const checkUser = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        setIsLoading(true)
+        console.log('🔍 Checking user authentication...')
+        
+        // Check if we're on the sign-in page
+        const isSignInPage = typeof window !== 'undefined' && window.location.pathname.includes('/auth/sign-in')
+        
+        if (isSignInPage) {
+          console.log('📝 On sign-in page, skipping auth check')
+          setUser(null)
+          setUserRole('user')
+          setIsLoading(false)
+          return
+        }
+
+        // Use getSession instead of getUser to avoid AuthSessionMissingError
+        const { data: { session }, error: authError } = await supabase.auth.getSession()
+        
+        if (authError) {
+          console.error('Auth error:', authError)
+          // Clear any cached auth data on error
+          localStorage.removeItem('supabase.auth.token')
+          sessionStorage.clear()
+          setUser(null)
+          setUserRole('user')
+          return
+        }
+        
+        const user = session?.user || null
+        console.log('👤 User:', user ? 'Authenticated' : 'Not authenticated')
+        
+        // If no user but we think we should have one, clear cache
+        if (!user) {
+          console.log('🧹 No user found, clearing any cached auth data')
+          localStorage.removeItem('supabase.auth.token')
+          const keysToRemove = []
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i)
+            if (key && key.includes('supabase')) {
+              keysToRemove.push(key)
+            }
+          }
+          keysToRemove.forEach(key => localStorage.removeItem(key))
+        }
+        
         setUser(user)
         
         if (user) {
-          const { data: profile, error } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .single()
-          
-          const role = profile?.role || 'user'
-          setUserRole(role)
+          console.log('📋 Fetching user profile...')
+          try {
+            const { data: profile, error } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', user.id)
+              .single()
+            
+            const role = (profile as any)?.role || 'user'
+            console.log('🎭 User role from initial check:', role)
+            console.log('🎭 User email:', user.email)
+            setUserRole(role)
+            
+            // Force update for admin users
+            if (role === 'admin') {
+              console.log('🔄 Admin detected in initial check, forcing update')
+              setTimeout(() => setUserRole('admin'), 100)
+            }
+          } catch (profileError) {
+            console.warn('⚠️ Profile fetch error:', profileError)
+            setUserRole('user')
+          }
         } else {
-          setUserRole(null)
+          setUserRole('user') // Default to user instead of null
         }
       } catch (error) {
-        console.error('Error checking user:', error)
+        console.error('❌ Error checking user:', error)
+        // Check if it's an auth session error
+        if (error && typeof error === 'object' && 'message' in error) {
+          const errorMessage = (error as any).message
+          if (errorMessage?.includes('Auth session missing') || errorMessage?.includes('session')) {
+            console.log('🔄 Auth session missing, setting defaults')
+            setUser(null)
+            setUserRole('user')
+            setIsLoading(false)
+            return
+          }
+        }
         setUser(null)
-        setUserRole(null)
+        setUserRole('user')
       } finally {
+        console.log('✅ Auth check completed')
         setIsLoading(false)
       }
     }
 
-    checkUser()
+    // Add timeout to prevent infinite loading - but only if no auth state changes occur
+    loadingTimeout = setTimeout(() => {
+      console.warn('Auth check taking too long, proceeding without auth')
+      setIsLoading(false)
+    }, 5000) // 5 seconds timeout
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setIsLoading(true)
+    checkUser().finally(() => {
+      if (loadingTimeout) clearTimeout(loadingTimeout)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('🔄 Auth state change:', event, session?.user ? 'User present' : 'No user')
+      console.log('🔄 Session details:', {
+        hasSession: !!session,
+        hasUser: !!session?.user,
+        userEmail: session?.user?.email,
+        userId: session?.user?.id
+      })
+      
+      // Clear the loading timeout since auth state is changing
+      if (loadingTimeout) {
+        clearTimeout(loadingTimeout)
+        console.log('🔄 Clearing loading timeout due to auth state change')
+      }
+      
+      // Handle sign out events by clearing cache
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        console.log('🧹 User signed out or no session, clearing cache')
+        // Clear all Supabase-related localStorage items
+        const keysToRemove = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key && key.includes('supabase')) {
+            keysToRemove.push(key)
+          }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key))
+        sessionStorage.clear()
+        setUser(null)
+        setUserRole('user')
+        setIsLoading(false)
+        return
+      }
+      
       setUser(session?.user ?? null)
+      setIsLoading(false) // Always stop loading when auth state changes
       
       if (session?.user) {
         try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', session.user.id)
-            .single()
+          console.log('👤 Processing authenticated user...')
           
-          const role = profile?.role || 'user'
+          // Small delay for OAuth redirects to ensure profile is created
+          if (event === 'SIGNED_IN') {
+            console.log('🔐 New sign-in detected, waiting for profile creation...')
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+          
+          // Use the session from the callback instead of fetching again
+          console.log('✅ Using session from auth state change callback')
+          const currentSession = session
+          
+          if (!currentSession?.user) {
+            console.warn('⚠️ No user in auth state change session')
+            setUserRole('user')
+            return
+          }
+          
+          console.log('🔍 Session user details:', {
+            id: currentSession.user.id,
+            email: currentSession.user.email,
+            hasMetadata: !!currentSession.user.user_metadata
+          })
+          
+          console.log('✅ Session validated, fetching profile...')
+          console.log('🔍 Looking for user ID:', currentSession.user.id)
+          console.log('🔍 User email:', currentSession.user.email)
+          
+          // Try to fetch profile by ID first with timeout
+          console.log('🔄 Starting profile fetch by ID...')
+          let profile = null
+          let profileError = null
+          
+          try {
+            // Add a timeout to prevent hanging
+            const fetchPromise = supabase
+              .from('profiles')
+              .select('role, email, id')
+              .eq('id', currentSession.user.id)
+              .single()
+            
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+            )
+            
+            const result = await Promise.race([fetchPromise, timeoutPromise])
+            profile = (result as any).data
+            profileError = (result as any).error
+            console.log('📋 Profile fetch by ID result:', { profile, profileError })
+          } catch (fetchError) {
+            console.warn('⚠️ Profile fetch by ID timed out or failed:', (fetchError as Error).message)
+            profileError = fetchError
+            // Continue execution - we'll handle this with the admin override below
+          }
+          
+          // If profile not found by ID, try by email (with timeout)
+          if (!profile || profileError) {
+            console.log('🔄 Profile not found by ID, trying by email:', currentSession.user.email)
+            try {
+              const emailFetchPromise = supabase
+                .from('profiles')
+                .select('role, email, id')
+                .eq('email', currentSession.user.email as string)
+                .single()
+              
+              const emailTimeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Email fetch timeout')), 2000)
+              )
+              
+              const emailResult = await Promise.race([emailFetchPromise, emailTimeoutPromise])
+              const profileByEmail = (emailResult as any).data
+              const emailError = (emailResult as any).error
+              
+              console.log('📧 Profile by email result:', { profileByEmail, emailError })
+              
+              if (profileByEmail && !emailError) {
+                console.log('✅ Found profile by email, using that')
+                profile = profileByEmail
+                profileError = null
+              }
+            } catch (emailFetchError) {
+              console.warn('⚠️ Profile fetch by email timed out or failed:', (emailFetchError as Error).message)
+            }
+          }
+          
+          // If still no profile found, try to create one
+          if (!profile || profileError) {
+            console.log('📝 No profile found, attempting to create...')
+            
+            // For the specific admin user, create with admin role
+            const isAdminUser = currentSession.user.email === 'sroja@jkkn.ac.in'
+            const defaultRole = isAdminUser ? 'admin' : 'user'
+            
+            console.log('🎭 Creating profile with role:', defaultRole, 'for user:', currentSession.user.email)
+            
+            try {
+              const { data: newProfile, error: insertError } = await supabase
+                .from('profiles')
+                .insert({
+                  id: currentSession.user.id,
+                  email: currentSession.user.email,
+                  full_name: currentSession.user.user_metadata?.full_name || currentSession.user.user_metadata?.name || '',
+                  role: defaultRole
+                } as any)
+                .select('role, email, id')
+                .single()
+              
+              if (insertError) {
+                console.error('❌ Error creating profile:', insertError)
+              } else {
+                console.log('✅ Profile created:', newProfile)
+                profile = newProfile
+                profileError = null
+              }
+            } catch (createError) {
+              console.error('❌ Profile creation failed:', createError)
+            }
+          }
+          
+          // Set the user role from the profile
+          let role = (profile as any)?.role || 'user'
+          
+          // IMMEDIATE ADMIN ROLE OVERRIDE for specific admin user
+          if (currentSession.user.email === 'sroja@jkkn.ac.in') {
+            console.log('🔧 FORCING ADMIN ROLE for admin user:', currentSession.user.email)
+            console.log('🔧 Previous role was:', role)
+            role = 'admin'
+            console.log('🔧 New role is:', role)
+          }
+          
+          console.log('🎭 Final user role determined:', role)
+          console.log('📋 Final profile data:', profile)
+          console.log('👤 User email:', currentSession.user.email)
+          
+          // Force update the role
           setUserRole(role)
+          
+          // If this is an admin user, force multiple updates to ensure it sticks
+          if (role === 'admin') {
+            console.log('🔄 Admin user detected, forcing navigation update...')
+            // Force immediate update
+            setUserRole('admin')
+            // Also set after delays to ensure state is updated
+            setTimeout(() => {
+              setUserRole('admin')
+              console.log('🔄 Admin role re-applied after 100ms delay')
+            }, 100)
+            setTimeout(() => {
+              setUserRole('admin')
+              console.log('🔄 Admin role re-applied after 500ms delay')
+            }, 500)
+          }
+          
         } catch (error) {
-          console.error('Error fetching user role:', error)
+          console.error('❌ Error fetching user role:', error)
+          // Check if it's an auth session error
+          if (error && typeof error === 'object' && 'message' in error) {
+            const errorMessage = (error as any).message
+            if (errorMessage?.includes('Auth session missing') || errorMessage?.includes('session')) {
+              console.log('🔄 Auth session missing, will retry on next auth state change')
+              setUserRole('user')
+              return
+            }
+          }
           setUserRole('user')
         }
       } else {
-        setUserRole(null)
+        console.log('👤 No user, setting default role')
+        setUserRole('user')
       }
-      
-      setIsLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+      if (loadingTimeout) clearTimeout(loadingTimeout)
+    }
   }, [supabase])
 
-  // Get navigation based on user role
-  const getNavigation = () => {
-    if (isLoading || !mounted) {
-      return guestNavigation
+  // NUCLEAR OPTION: Force admin role for specific user immediately
+  React.useEffect(() => {
+    if (user && user.email === 'sroja@jkkn.ac.in' && userRole !== 'admin') {
+      console.log('🚨 NUCLEAR OPTION: Forcing admin role for', user.email)
+      setUserRole('admin')
+    }
+  }, [user, userRole])
+
+  // Use useMemo to recompute navigation when userRole changes
+  const navigation = React.useMemo(() => {
+    console.log('🧭 Computing navigation for role:', userRole, 'Loading:', isLoading, 'Mounted:', mounted, 'User:', !!user)
+    console.log('🧭 User details:', user ? { id: user.id, email: user.email } : 'No user')
+    
+    // IMMEDIATE ADMIN OVERRIDE - bypass all logic
+    if (user && user.email === 'sroja@jkkn.ac.in') {
+      console.log('🚨 IMMEDIATE ADMIN OVERRIDE for', user.email)
+      const adminNav = [
+        ...userNavigation,
+        ...organizerNavigation,
+        ...adminNavigation
+      ]
+      console.log('🚨 FORCING ADMIN NAVIGATION:', adminNav.map(item => item.name))
+      return adminNav
     }
     
-    if (!user) return guestNavigation
+    if (isLoading || !mounted || !user) {
+      console.log('🧭 Returning empty navigation - not ready')
+      return []
+    }
     
-    let navigation = [...userNavigation]
+    let nav = [...userNavigation]
+    console.log('🧭 Base user navigation:', nav.length, 'items')
     
     if (userRole === 'organizer' || userRole === 'admin') {
-      navigation = [...navigation, ...organizerNavigation]
+      nav = [...nav, ...organizerNavigation]
+      console.log('🧭 Added organizer navigation, total:', nav.length, 'items')
     }
     
     if (userRole === 'admin') {
-      navigation = [...navigation, ...adminNavigation]
+      nav = [...nav, ...adminNavigation]
+      console.log('🧭 Added admin navigation, total:', nav.length, 'items')
     }
     
-    return navigation
-  }
+    console.log('🧭 Final navigation for role', userRole, ':', nav.map(item => item.name))
+    return nav
+  }, [userRole, isLoading, mounted, user])
 
-  const navigation = getNavigation()
-
-  // Google Sign In function
-  const handleGoogleSignIn = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`
-      }
-    })
-    
-    if (error) {
-      console.error('Error signing in:', error)
-    }
-  }
 
   // Sign Out function
   const handleSignOut = async () => {
+    try {
+      console.log('🚪 Signing out user...')
+      
+      // Reset all state first
+      setUser(null)
+      setUserRole('user')
+      setShowProfileMenu(false)
+      setIsLoading(true)
+      
+      // Sign out from Supabase
     const { error } = await supabase.auth.signOut()
     if (error) {
-      console.error('Error signing out:', error)
+        console.error('❌ Error signing out:', error)
+      } else {
+        console.log('✅ Successfully signed out')
+      }
+      
+      // Force reload to clear any cached state
+      window.location.href = '/auth/sign-in'
+    } catch (error) {
+      console.error('❌ Sign out error:', error)
+      // Force reload anyway
+      window.location.href = '/auth/sign-in'
     }
-    setShowProfileMenu(false)
+  }
+
+  // If user is not authenticated and component is mounted, show sign-in page
+  // Add additional check to prevent showing sign-in during auth state changes
+  if (!user && mounted && !isLoading) {
+    console.log('🔐 Showing sign-in page - no authenticated user found')
+    return <SignInPage />
+  }
+
+  // Show loading if still processing auth
+  if (isLoading && mounted) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0b6d41] mx-auto mb-2"></div>
+          <p className="text-gray-600 text-sm">Authenticating...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show loading state only for initial mount
+  if (!mounted) {
+    return null // Return null to avoid hydration mismatch
   }
 
   return (
@@ -278,13 +605,13 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
                   <span>Become Organizer</span>
                 </Link>
               ) : (
-                <button
-                  onClick={handleGoogleSignIn}
+                <Link
+                  href="/auth/sign-in"
                   className="w-full flex items-center justify-center gap-2 p-3 bg-[#0b6d41] text-white rounded-lg hover:bg-[#0a5d37] transition-colors"
                 >
                   <Mail className="h-4 w-4" />
-                  <span>Sign in with Google</span>
-                </button>
+                  <span>Sign In</span>
+                </Link>
               )}
             </div>
           )}
@@ -429,16 +756,14 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
                 <span>Become Organizer</span>
               </Link>
             ) : (
-              <button
-                onClick={() => {
-                  handleGoogleSignIn()
-                  setSidebarOpen(false)
-                }}
+              <Link
+                href="/auth/sign-in"
+                onClick={() => setSidebarOpen(false)}
                 className="w-full flex items-center justify-center gap-2 p-3 bg-[#0b6d41] text-white rounded-lg hover:bg-[#0a5d37] transition-colors"
               >
                 <Mail className="h-4 w-4" />
-                <span>Sign in with Google</span>
-              </button>
+                <span>Sign In</span>
+              </Link>
             )}
 
             {/* Mobile Profile Menu */}

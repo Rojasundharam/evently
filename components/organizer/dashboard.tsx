@@ -3,14 +3,16 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { OrganizerDashboard as OrganizerDashboardType } from '@/types'
-import { Calendar, Users, DollarSign, CheckCircle, TrendingUp } from 'lucide-react'
+import { Calendar, Users, DollarSign, CheckCircle, TrendingUp, Activity } from 'lucide-react'
 import { formatDate, formatPrice } from '@/lib/utils'
 import Link from 'next/link'
+import { RealTimeStatistics } from './real-time-statistics'
 
 export function OrganizerDashboard() {
   const [dashboardData, setDashboardData] = useState<OrganizerDashboardType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showRealTimeStats, setShowRealTimeStats] = useState(false)
 
   useEffect(() => {
     fetchDashboardData()
@@ -80,6 +82,22 @@ export function OrganizerDashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Toggle Button for Real-Time Stats */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowRealTimeStats(!showRealTimeStats)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-colors shadow-md"
+        >
+          <Activity className="h-4 w-4" />
+          {showRealTimeStats ? 'Show Summary' : 'Show Real-Time Stats'}
+        </button>
+      </div>
+
+      {/* Real-Time Statistics View */}
+      {showRealTimeStats ? (
+        <RealTimeStatistics autoRefresh={true} refreshInterval={30000} />
+      ) : (
+        <>
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white rounded-lg shadow-md p-6">
@@ -229,6 +247,8 @@ export function OrganizerDashboard() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   )
 }
