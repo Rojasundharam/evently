@@ -25,43 +25,14 @@ export default function SignInPage() {
       setIsLoading(true)
       setError(null)
       
-      // Determine the callback URL based on environment
-      let callbackUrl: string
-      
-      if (typeof window !== 'undefined') {
-        // We're in the browser
-        const origin = window.location.origin
-        
-        // For production on Vercel
-        if (origin.includes('vercel.app') || origin.includes('evently-by-jicate')) {
-          callbackUrl = 'https://evently-by-jicate.vercel.app/api/auth/callback'
-        } else {
-          // For local development
-          callbackUrl = `${origin}/api/auth/callback`
-        }
-      } else {
-        // Fallback
-        callbackUrl = 'https://evently-by-jicate.vercel.app/api/auth/callback'
-      }
-      
-      console.log('OAuth Callback URL:', callbackUrl)
-      
       const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: callbackUrl
-        }
+        provider: 'google'
       })
 
       if (error) {
         console.error('OAuth error:', error)
         setError(error.message)
         setIsLoading(false)
-      }
-      
-      // Log the auth URL for debugging
-      if (data?.url) {
-        console.log('Full OAuth URL:', data.url)
       }
       
     } catch (err) {
