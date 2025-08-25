@@ -69,29 +69,101 @@ export default function DashboardHome() {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
+        console.log('🏠 Fetching dashboard data...')
+        
         // Get user
-        const { data: { user } } = await supabase.auth.getUser()
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        
+        if (userError) {
+          console.error('❌ User fetch error:', userError)
+          setLoading(false)
+          return
+        }
+        
+        console.log('👤 User:', user ? 'Found' : 'Not found')
         setUser(user)
 
         if (user) {
           // Get user role
-          const { data: profile } = await supabase
+          console.log('📋 Fetching user profile...')
+          const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', user.id)
             .single()
           
-          setUserRole(profile?.role || 'user')
+          if (profileError) {
+            console.warn('⚠️ Profile fetch error:', profileError)
+          }
+          
+          const userRole = profile?.role || 'user'
+          console.log('🎭 User role:', userRole)
+          setUserRole(userRole)
+          
+          // Redirect admin users to admin dashboard
+          if (userRole === 'admin') {
+            console.log('🔄 Redirecting admin to admin dashboard')
+            window.location.href = '/admin'
+            return
+          }
 
-          // Get stats
-          const [eventsResult, bookingsResult] = await Promise.all([
-            supabase.from('events').select('*', { count: 'exact' }),
-            supabase.from('bookings').select('total_amount').eq('user_id', user.id)
+          // Fetch all data in parallel for better performance
+          console.log('📊 Fetching dashboard data in parallel...')
+          
+          const [eventsResult, bookingsResult, recentEventsResult, recentBookingsResult] = await Promise.allSettled([
+            // Get total events count
+            supabase
+              .from('events')
+              .select('*', { count: 'exact', head: true }),
+            
+            // Get user bookings
+            supabase
+              .from('bookings')
+              .select('total_amount')
+              .eq('user_id', user.id),
+            
+            // Get recent events
+            supabase
+              .from('events')
+              .select('id, title, date, time, venue, image_url, price')
+              .eq('status', 'published')
+              .order('created_at', { ascending: false })
+              .limit(4),
+            
+            // Get recent bookings
+            supabase
+              .from('bookings')
+              .select(`
+                id,
+                quantity,
+                total_amount,
+                payment_status,
+                events (
+                  title,
+                  date,
+                  venue,
+                  image_url
+                )
+              `)
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(3)
           ])
 
-          const totalEvents = eventsResult.count || 0
-          const myBookings = bookingsResult.data?.length || 0
-          const totalSpent = bookingsResult.data?.reduce((sum, booking) => sum + booking.total_amount, 0) || 0
+          // Process stats
+          let totalEvents = 0
+          let myBookings = 0
+          let totalSpent = 0
+
+          if (eventsResult.status === 'fulfilled') {
+            totalEvents = eventsResult.value.count || 0
+          }
+
+          if (bookingsResult.status === 'fulfilled' && bookingsResult.value.data) {
+            const bookingsData = bookingsResult.value.data
+            myBookings = bookingsData.length
+            totalSpent = bookingsData.reduce((sum, booking) => sum + (booking.total_amount || 0), 0)
+          }
 
           setStats({
             totalEvents,
@@ -99,46 +171,43 @@ export default function DashboardHome() {
             upcomingEvents: totalEvents,
             totalSpent
           })
+          
+          console.log('📊 Stats loaded:', { totalEvents, myBookings, totalSpent })
 
-          // Get recent events
-          const { data: events } = await supabase
-            .from('events')
-            .select('id, title, date, time, venue, image_url, price')
-            .eq('status', 'published')
-            .order('created_at', { ascending: false })
-            .limit(4)
+          // Process recent events
+          if (recentEventsResult.status === 'fulfilled' && recentEventsResult.value.data) {
+            setRecentEvents(recentEventsResult.value.data)
+            console.log('📅 Recent events loaded:', recentEventsResult.value.data.length)
+          } else {
+            setRecentEvents([])
+          }
 
-          setRecentEvents(events || [])
-
-          // Get recent bookings
-          const { data: bookings } = await supabase
-            .from('bookings')
-            .select(`
-              id,
-              quantity,
-              total_amount,
-              payment_status,
-              events (
-                title,
-                date,
-                venue,
-                image_url
-              )
-            `)
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(3)
-
-          setRecentBookings(bookings || [])
+          // Process recent bookings
+          if (recentBookingsResult.status === 'fulfilled' && recentBookingsResult.value.data) {
+            setRecentBookings(recentBookingsResult.value.data)
+            console.log('🎫 Recent bookings loaded:', recentBookingsResult.value.data.length)
+          } else {
+            setRecentBookings([])
+          }
         }
+        
+        console.log('✅ Dashboard data fetch completed')
       } catch (error) {
-        console.error('Error fetching dashboard data:', error)
+        console.error('❌ Dashboard fetch error:', error)
       } finally {
         setLoading(false)
       }
     }
 
-    fetchDashboardData()
+    // Add timeout to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      console.warn('⏰ Dashboard loading timeout - proceeding anyway')
+      setLoading(false)
+    }, 8000) // 8 second timeout for slower connections
+
+    fetchDashboardData().finally(() => {
+      clearTimeout(loadingTimeout)
+    })
   }, [supabase])
 
   if (loading) {
