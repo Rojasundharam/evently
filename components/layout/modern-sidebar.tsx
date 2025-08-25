@@ -401,7 +401,7 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
       console.log('🚨 NUCLEAR OPTION: Forcing admin role for', user.email)
       setUserRole('admin')
     }
-  }, [user, userRole])
+  }, [user?.email]) // Remove userRole from dependencies to prevent infinite loop
 
   // Use useMemo to recompute navigation when userRole changes
   const navigation = React.useMemo(() => {
@@ -438,9 +438,9 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
       console.log('🧭 Added admin navigation, total:', nav.length, 'items')
     }
     
-    console.log('🧭 Final navigation for role', userRole, ':', nav.map(item => item.name))
-    return nav
-  }, [userRole, isLoading, mounted, user])
+         console.log('🧭 Final navigation for role', userRole, ':', nav.map(item => item.name))
+     return nav
+   }, [userRole, isLoading, mounted, user?.email]) // More specific dependencies
 
 
   // Sign Out function
