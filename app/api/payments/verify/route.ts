@@ -182,10 +182,13 @@ export async function POST(request: NextRequest) {
 // Helper function to generate tickets for a booking
 interface Booking {
   id: string
+  event_id: string
+  user_id?: string
   quantity: number
   events: {
     id: string
     title: string
+    date?: string
   }
 }
 
@@ -226,7 +229,20 @@ async function generateTicketsForBooking(supabase: ReturnType<typeof createClien
     
     // Now update QR data with actual ticket ID and encrypt
     qrData.ticketId = ticket.id
-    const encryptedQR = await encryptQRData(qrData)
+    
+    // Use the more robust qr-generator encryption for better compatibility
+    const ticketData = {
+      ticketId: ticket.id,
+      eventId: booking.event_id,
+      bookingId: booking.id,
+      userId: booking.user_id || '',
+      ticketNumber: ticketNumber,
+      ticketType: 'general',
+      eventDate: booking.events?.date || new Date().toISOString()
+    }
+    
+    const { encryptTicketData } = await import('@/lib/qr-generator')
+    const encryptedQR = await encryptTicketData(ticketData)
     
     // Update ticket with encrypted QR code
     const { error: updateError } = await supabase

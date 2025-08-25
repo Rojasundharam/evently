@@ -5,7 +5,7 @@ const getCrypto = async () => {
 }
 
 // Secret key for QR code encryption (in production, use environment variable)
-const QR_SECRET = process.env.NEXT_PUBLIC_QR_SECRET || 'evently-qr-secret-2024'
+const QR_SECRET = process.env.QR_ENCRYPTION_SECRET || 'evently-qr-secret-2024'
 
 export interface QRCodeData {
   ticketId: string

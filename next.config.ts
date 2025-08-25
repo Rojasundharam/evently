@@ -3,18 +3,28 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Optimize performance
   experimental: {
-    optimizePackageImports: ['lucide-react', '@supabase/supabase-js', 'crypto-js', 'qrcode'],
-  },
-  
-  // Turbopack configuration (replaces experimental.turbo)
-  turbopack: {
-    rules: {
-      '*.svg': {
-        loaders: ['@svgr/webpack'],
-        as: '*.js',
+    optimizePackageImports: [
+      'lucide-react', 
+      '@supabase/supabase-js', 
+      'crypto-js', 
+      'qrcode',
+      'html2canvas',
+      'jspdf',
+      'html5-qrcode',
+      'date-fns'
+    ],
+    // Enable turbo mode for faster builds
+    turbo: {
+      rules: {
+        '*.svg': {
+          loaders: ['@svgr/webpack'],
+          as: '*.js',
+        },
       },
     },
   },
+  
+  // Remove duplicate turbopack config since it's in experimental now
   
   // Enable webpack optimizations
   webpack: (config, { dev, isServer }) => {
@@ -30,6 +40,14 @@ const nextConfig: NextConfig = {
       config.optimization.removeAvailableModules = false
       config.optimization.removeEmptyChunks = false
       config.optimization.splitChunks = false
+      
+      // Reduce bundle size in development
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'crypto-js$': 'crypto-js/crypto-js.js',
+        'html2canvas$': 'html2canvas/dist/html2canvas.min.js',
+        'jspdf$': 'jspdf/dist/jspdf.umd.min.js',
+      }
     }
     
     if (!dev && !isServer) {

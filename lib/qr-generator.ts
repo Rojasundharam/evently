@@ -1,6 +1,24 @@
-import QRCode from 'qrcode'
-import CryptoJS from 'crypto-js'
+// Dynamic imports for better performance
 import { v4 as uuidv4 } from 'uuid'
+
+// Lazy load heavy libraries
+const getQRCode = async () => {
+  const QRCode = await import('qrcode')
+  return QRCode.default
+}
+
+const getCrypto = async () => {
+  const CryptoJS = await import('crypto-js')
+  return CryptoJS.default
+}
+
+// Synchronous fallback for server-side compatibility
+let CryptoJS: any = null
+try {
+  CryptoJS = require('crypto-js')
+} catch (error) {
+  // Will use dynamic import instead
+}
 
 const QR_SECRET = process.env.QR_ENCRYPTION_SECRET || 'evently-qr-secret-2024'
 
@@ -28,7 +46,12 @@ export function generateTicketNumber(eventId: string): string {
   return `${eventPrefix}-${timestamp}-${random}`
 }
 
-export function encryptTicketData(ticketData: TicketData): string {
+// Synchronous version for backward compatibility
+export function encryptTicketDataSync(ticketData: TicketData): string {
+  if (!CryptoJS) {
+    throw new Error('CryptoJS not available for synchronous encryption')
+  }
+  
   const dataString = JSON.stringify(ticketData)
   const encrypted = CryptoJS.AES.encrypt(dataString, QR_SECRET).toString()
   
@@ -43,8 +66,41 @@ export function encryptTicketData(ticketData: TicketData): string {
   return Buffer.from(JSON.stringify(encryptedData)).toString('base64')
 }
 
-export function decryptTicketData(encryptedString: string): TicketData | null {
+// Async version for performance
+export async function encryptTicketData(ticketData: TicketData): Promise<string> {
   try {
+    // Try synchronous version first for compatibility
+    if (CryptoJS) {
+      return encryptTicketDataSync(ticketData)
+    }
+    
+    // Fall back to dynamic import
+    const CryptoJSModule = await getCrypto()
+    const dataString = JSON.stringify(ticketData)
+    const encrypted = CryptoJSModule.AES.encrypt(dataString, QR_SECRET).toString()
+    
+    const signature = CryptoJSModule.HmacSHA256(dataString, QR_SECRET).toString()
+    
+    const encryptedData: EncryptedTicketData = {
+      data: encrypted,
+      signature,
+      timestamp: Date.now()
+    }
+    
+    return Buffer.from(JSON.stringify(encryptedData)).toString('base64')
+  } catch (error) {
+    console.error('Error in encryptTicketData:', error)
+    throw error
+  }
+}
+
+// Synchronous version for backward compatibility
+export function decryptTicketDataSync(encryptedString: string): TicketData | null {
+  try {
+    if (!CryptoJS) {
+      throw new Error('CryptoJS not available for synchronous decryption')
+    }
+    
     const decoded = Buffer.from(encryptedString, 'base64').toString()
     const encryptedData: EncryptedTicketData = JSON.parse(decoded)
     
@@ -71,8 +127,45 @@ export function decryptTicketData(encryptedString: string): TicketData | null {
   }
 }
 
+// Async version for performance
+export async function decryptTicketData(encryptedString: string): Promise<TicketData | null> {
+  try {
+    // Try synchronous version first for compatibility
+    if (CryptoJS) {
+      return decryptTicketDataSync(encryptedString)
+    }
+    
+    // Fall back to dynamic import
+    const CryptoJSModule = await getCrypto()
+    const decoded = Buffer.from(encryptedString, 'base64').toString()
+    const encryptedData: EncryptedTicketData = JSON.parse(decoded)
+    
+    const decrypted = CryptoJSModule.AES.decrypt(encryptedData.data, QR_SECRET)
+    const dataString = decrypted.toString(CryptoJSModule.enc.Utf8)
+    const ticketData: TicketData = JSON.parse(dataString)
+    
+    const expectedSignature = CryptoJSModule.HmacSHA256(dataString, QR_SECRET).toString()
+    if (expectedSignature !== encryptedData.signature) {
+      console.error('Invalid ticket signature')
+      return null
+    }
+    
+    const hoursSinceCreation = (Date.now() - encryptedData.timestamp) / (1000 * 60 * 60)
+    if (hoursSinceCreation > 24 * 365) {
+      console.error('Ticket QR code expired')
+      return null
+    }
+    
+    return ticketData
+  } catch (error) {
+    console.error('Error decrypting ticket data:', error)
+    return null
+  }
+}
+
 export async function generateQRCode(ticketData: TicketData): Promise<string> {
-  const encryptedData = encryptTicketData(ticketData)
+  const QRCode = await getQRCode()
+  const encryptedData = await encryptTicketData(ticketData)
   
   const validationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/tickets/validate?data=${encodeURIComponent(encryptedData)}`
   

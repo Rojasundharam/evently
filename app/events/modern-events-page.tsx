@@ -36,6 +36,7 @@ export default function ModernEventsPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
+  const [user, setUser] = useState<any>(null)
   const supabase = createClient()
 
   useEffect(() => {
@@ -108,8 +109,8 @@ export default function ModernEventsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b sticky top-0 z-10">
+      {/* Desktop-Only Sticky Header */}
+      <div className="bg-white shadow-sm border-b sticky top-0 z-10 hidden lg:block">
         <div className="px-6 py-6">
           <div className="max-w-7xl mx-auto">
             <div className="flex items-center justify-between">
@@ -117,7 +118,7 @@ export default function ModernEventsPage() {
                 <h1 className="text-3xl font-bold text-gray-900">Discover Events</h1>
                 <p className="text-gray-600 mt-2">Find amazing events happening near you</p>
               </div>
-              <div className="hidden md:flex items-center gap-4">
+              <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 text-sm text-gray-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   <span>{events.length} events available</span>
@@ -128,7 +129,7 @@ export default function ModernEventsPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 lg:py-8">
         {/* Message Alert */}
         {showMessage && (
           <div className="mb-8 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6 flex items-start justify-between shadow-sm">
@@ -151,9 +152,9 @@ export default function ModernEventsPage() {
         )}
 
         {/* Search and Filter */}
-        <div className="mb-8">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <div className="flex flex-col lg:flex-row gap-6">
+        <div className="mb-4 sm:mb-6 lg:mb-8">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
+            <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-6">
               {/* Search */}
               <div className="flex-1">
                 <div className="relative">
@@ -163,7 +164,7 @@ export default function ModernEventsPage() {
                     placeholder="Search events, venues, or locations..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
+                    className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-3 sm:py-4 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
                   />
                 </div>
               </div>
@@ -173,7 +174,7 @@ export default function ModernEventsPage() {
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-4 py-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
+                  className="w-full px-3 sm:px-4 py-3 sm:py-4 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
                 >
                   {categories.map((category) => (
                     <option key={category.value} value={category.value}>
@@ -185,8 +186,8 @@ export default function ModernEventsPage() {
             </div>
 
             {/* Quick Stats */}
-            <div className="flex items-center justify-between mt-6 pt-6 border-t border-gray-100">
-              <div className="flex items-center gap-6 text-sm text-gray-600">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-gray-100 gap-3 sm:gap-0">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-xs sm:text-sm text-gray-600">
                 <span className="flex items-center gap-2">
                   <Calendar className="h-4 w-4" />
                   {filteredEvents.length} events found
@@ -221,7 +222,7 @@ export default function ModernEventsPage() {
 
         {/* Events Grid */}
         {loading ? (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
             {[...Array(6)].map((_, i) => (
               <div key={i} className="bg-white rounded-2xl shadow-sm overflow-hidden animate-pulse border border-gray-100">
                 <div className="h-56 bg-gray-200"></div>
@@ -266,7 +267,7 @@ export default function ModernEventsPage() {
             </div>
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
             {filteredEvents.map((event) => (
               <Link
                 key={event.id}

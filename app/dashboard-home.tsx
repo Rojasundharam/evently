@@ -151,38 +151,7 @@ export default function DashboardHome() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile Header */}
-      <div className="bg-white shadow-sm border-b lg:hidden">
-        <div className="px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-[#0b6d41] to-[#ffde59] rounded-xl flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-gray-900">
-                  {user ? `Hi, ${user.email?.split('@')[0]}!` : 'Evently'}
-                </h1>
-                <p className="text-sm text-gray-600">
-                  {userRole === 'admin' ? 'Admin Dashboard' : 
-                   userRole === 'organizer' ? 'Organizer Dashboard' : 
-                   user ? 'Your Dashboard' : 'Welcome'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                <Bell className="h-5 w-5" />
-              </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                <Search className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop Header */}
+      {/* Desktop-Only Header */}
       <div className="bg-white shadow-sm border-b hidden lg:block">
         <div className="px-6 py-6">
           <div className="flex items-center justify-between">

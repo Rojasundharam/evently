@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { decryptTicketData } from '@/lib/qr-generator'
+import { decryptTicketData, decryptTicketDataSync } from '@/lib/qr-generator'
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,8 +40,60 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Decrypt QR code
-    const qrData = decryptTicketData(qrCode)
+    // Try to decrypt QR code with both methods for compatibility
+    let qrData = null
+    let decryptionErrors = []
+    
+    // First try the qr-generator method (primary method used for ticket generation)
+    try {
+      // Try synchronous version first for better performance
+      try {
+        qrData = decryptTicketDataSync(qrCode)
+        console.log('Successfully decrypted QR code using qr-generator sync method')
+      } catch (syncError) {
+        // Fall back to async version
+        qrData = await decryptTicketData(qrCode)
+        console.log('Successfully decrypted QR code using qr-generator async method')
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.log('Failed with qr-generator method:', errorMessage)
+      decryptionErrors.push(`qr-generator: ${errorMessage}`)
+    }
+    
+    // If that fails, try the qr-code method (legacy compatibility)
+    if (!qrData) {
+      try {
+        const { decryptQRData } = await import('@/lib/qr-code')
+        const qrCodeData = await decryptQRData(qrCode)
+        if (qrCodeData) {
+          // Convert QRCodeData to TicketData format
+          qrData = {
+            ticketId: qrCodeData.ticketId,
+            eventId: qrCodeData.eventId,
+            bookingId: qrCodeData.bookingId,
+            userId: '', // Will be filled from database
+            ticketNumber: qrCodeData.ticketNumber,
+            ticketType: 'general',
+            eventDate: new Date().toISOString()
+          }
+          console.log('Successfully decrypted QR code using qr-code method')
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.log('Failed with qr-code method:', errorMessage)
+        decryptionErrors.push(`qr-code: ${errorMessage}`)
+      }
+    }
+    
+    // Log all decryption attempts for debugging
+    if (!qrData) {
+      console.error('QR Code decryption failed with all methods:', {
+        qrCodeLength: qrCode.length,
+        qrCodePreview: qrCode.substring(0, 50) + '...',
+        errors: decryptionErrors
+      })
+    }
     
     if (!qrData) {
       // Log invalid scan attempt

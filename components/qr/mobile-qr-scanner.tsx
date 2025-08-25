@@ -1,7 +1,12 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
+
+// Dynamic import for html5-qrcode to reduce initial bundle size
+const getHtml5QrCode = async () => {
+  const { Html5Qrcode } = await import('html5-qrcode')
+  return Html5Qrcode
+}
 import { 
   QrCode, 
   Camera, 
@@ -41,15 +46,21 @@ export default function MobileQRScanner({ eventId, eventTitle, onScanResult }: M
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment')
   const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null)
   const [scanCount, setScanCount] = useState(0)
-  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const scannerRef = useRef<any>(null)
 
   useEffect(() => {
     // Check camera availability
-    Html5Qrcode.getCameras().then(cameras => {
-      setHasCamera(cameras.length > 0)
-    }).catch(() => {
-      setHasCamera(false)
-    })
+    const checkCameras = async () => {
+      try {
+        const Html5Qrcode = await getHtml5QrCode()
+        const cameras = await Html5Qrcode.getCameras()
+        setHasCamera(cameras.length > 0)
+      } catch (error) {
+        setHasCamera(false)
+      }
+    }
+    
+    checkCameras()
 
     return () => {
       stopScanning()
@@ -58,6 +69,7 @@ export default function MobileQRScanner({ eventId, eventTitle, onScanResult }: M
 
   const startScanning = async () => {
     try {
+      const Html5Qrcode = await getHtml5QrCode()
       const html5QrCode = new Html5Qrcode("mobile-qr-reader")
       scannerRef.current = html5QrCode
 

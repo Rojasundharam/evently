@@ -1,556 +1,403 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
-import { 
-  QrCode, 
-  CheckCircle, 
-  XCircle, 
-  Search,
-  Scan,
-  Shield,
-  Ticket,
-  User,
-  Calendar,
-  Clock,
-  MapPin,
-  Hash,
-  AlertCircle,
-  Camera,
-  X
-} from 'lucide-react'
-import { decryptTicketData } from '@/lib/qr-generator'
-import UserFlowGuard from '@/components/auth/user-flow-guard'
+import { QrCode, Search, CheckCircle, XCircle, AlertCircle, Clock, User, Ticket } from 'lucide-react'
 
 interface VerificationResult {
-  verified: boolean
+  success: boolean
   message: string
   ticket?: {
     id: string
     ticket_number: string
     status: string
+    customer_name?: string
+    customer_email?: string
+    event_title?: string
+    event_date?: string
     checked_in_at?: string
-    booking: {
-      id: string
-      user_name: string
-      user_email: string
-      user_phone?: string
-      quantity: number
-      total_amount: number
-      event: {
-        id: string
-        title: string
-        date: string
-        time: string
-        venue: string
-        location: string
-      }
-    }
   }
 }
 
 export default function VerifyTicketsPage() {
-  const [searchInput, setSearchInput] = useState('')
-  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [scannerActive, setScannerActive] = useState(false)
-  const [recentVerifications, setRecentVerifications] = useState<any[]>([])
-  const [cameraError, setCameraError] = useState<string | null>(null)
-  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const [ticketInput, setTicketInput] = useState('')
+  const [isVerifying, setIsVerifying] = useState(false)
+  const [result, setResult] = useState<VerificationResult | null>(null)
+  const [recentCheckins, setRecentCheckins] = useState<any[]>([])
   const supabase = createClient()
 
-  useEffect(() => {
-    fetchRecentVerifications()
-    
-    // Cleanup function
-    return () => {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.stop().catch(() => {
-            // Ignore errors during cleanup
-          })
-        } catch {
-          // Ignore cleanup errors
-        }
-        scannerRef.current = null
-      }
-      setScannerActive(false)
+  const handleVerify = async () => {
+    if (!ticketInput.trim()) {
+      setResult({
+        success: false,
+        message: 'Please enter a ticket number, booking ID, or QR code data'
+      })
+      return
     }
-  }, [])
 
-  const fetchRecentVerifications = async () => {
-    const { data: tickets } = await supabase
-      .from('tickets')
-      .select(`
-        *,
-        bookings (
-          *,
-          events (*)
-        )
-      `)
-      .not('checked_in_at', 'is', null)
-      .order('checked_in_at', { ascending: false })
-      .limit(10)
-
-    if (tickets) {
-      setRecentVerifications(tickets)
-    }
-  }
-
-  const verifyTicket = async (input: string) => {
-    setLoading(true)
-    setVerificationResult(null)
+    setIsVerifying(true)
+    setResult(null)
 
     try {
-      // First try to decrypt if it's a QR code
-      let searchValue = input
-      let searchField = 'ticket_number'
+      // Try multiple verification methods
+      let ticket: any = null
       
-      try {
-        const decryptedData = decryptTicketData(input)
-        if (decryptedData && decryptedData.ticketNumber) {
-          searchValue = decryptedData.ticketNumber
-        }
-      } catch {
-        // Not a QR code, treat as booking ID or ticket number
-        // Check if it looks like a booking ID (UUID format)
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-        if (uuidRegex.test(input)) {
-          searchField = 'booking_id'
-        }
-      }
-
-      // Search for the ticket
-      let query = supabase
+      // Method 1: Direct ticket number lookup
+      const { data: ticketByNumber } = await supabase
         .from('tickets')
         .select(`
           *,
           bookings (
-            *,
-            events (*)
+            user_name,
+            user_email,
+            events (
+              title,
+              date,
+              time
+            )
           )
         `)
+        .eq('ticket_number', ticketInput.trim())
+        .single()
 
-      if (searchField === 'booking_id') {
-        query = query.eq('booking_id', searchValue)
-      } else {
-        query = query.eq('ticket_number', searchValue)
+      if (ticketByNumber) {
+        ticket = ticketByNumber
       }
 
-      const { data: tickets, error } = await query
+      // Method 2: Booking ID lookup
+      if (!ticket) {
+        const { data: ticketByBooking } = await supabase
+          .from('tickets')
+          .select(`
+            *,
+            bookings (
+              user_name,
+              user_email,
+              events (
+                title,
+                date,
+                time
+              )
+            )
+          `)
+          .eq('booking_id', ticketInput.trim())
+          .limit(1)
+          .single()
 
-      if (error) {
-        throw error
+        if (ticketByBooking) {
+          ticket = ticketByBooking
+        }
       }
 
-      if (tickets && tickets.length > 0) {
-        const ticket = tickets[0]
-        
-        // Format the result
-        const result: VerificationResult = {
-          verified: true,
-          message: ticket.status === 'used' 
-            ? `Ticket already used (Checked in at ${new Date(ticket.checked_in_at).toLocaleString()})`
-            : 'Valid ticket - Not yet used',
+      // Method 3: Try to decrypt as QR code (primary method)
+      if (!ticket) {
+        try {
+          // Try qr-generator decryption (this is what generates tickets)
+          const { decryptTicketData, decryptTicketDataSync } = await import('@/lib/qr-generator')
+          let qrData = null
+          
+          // Try synchronous version first
+          try {
+            qrData = decryptTicketDataSync(ticketInput.trim())
+          } catch (syncError) {
+            // Fall back to async version
+            qrData = await decryptTicketData(ticketInput.trim())
+          }
+          
+          if (qrData) {
+            console.log('Successfully decrypted QR code:', qrData.ticketId)
+            const { data: ticketByQR } = await supabase
+              .from('tickets')
+              .select(`
+                *,
+                bookings (
+                  user_name,
+                  user_email,
+                  events (
+                    title,
+                    date,
+                    time
+                  )
+                )
+              `)
+              .eq('id', qrData.ticketId)
+              .single()
+
+            if (ticketByQR) {
+              ticket = ticketByQR
+            }
+          }
+        } catch (error) {
+          console.log('QR decryption failed with qr-generator:', error instanceof Error ? error.message : String(error))
+        }
+      }
+
+      // Method 4: Try qr-code decryption (legacy compatibility)
+      if (!ticket) {
+        try {
+          const { decryptQRData } = await import('@/lib/qr-code')
+          const qrData = await decryptQRData(ticketInput.trim())
+          
+          if (qrData) {
+            console.log('Successfully decrypted QR code with legacy method:', qrData.ticketId)
+            const { data: ticketByQR } = await supabase
+              .from('tickets')
+              .select(`
+                *,
+                bookings (
+                  user_name,
+                  user_email,
+                  events (
+                    title,
+                    date,
+                    time
+                  )
+                )
+              `)
+              .eq('id', qrData.ticketId)
+              .single()
+
+            if (ticketByQR) {
+              ticket = ticketByQR
+            }
+          }
+        } catch (error) {
+          console.log('QR-code decryption failed:', error instanceof Error ? error.message : String(error))
+        }
+      }
+
+      if (ticket) {
+        setResult({
+          success: true,
+          message: `Ticket found and verified successfully`,
           ticket: {
             id: ticket.id,
             ticket_number: ticket.ticket_number,
             status: ticket.status,
-            checked_in_at: ticket.checked_in_at,
-            booking: {
-              id: ticket.bookings.id,
-              user_name: ticket.bookings.user_name,
-              user_email: ticket.bookings.user_email,
-              user_phone: ticket.bookings.user_phone,
-              quantity: ticket.bookings.quantity,
-              total_amount: ticket.bookings.total_amount,
-              event: {
-                id: ticket.bookings.events.id,
-                title: ticket.bookings.events.title,
-                date: ticket.bookings.events.date,
-                time: ticket.bookings.events.time,
-                venue: ticket.bookings.events.venue,
-                location: ticket.bookings.events.location
-              }
-            }
+            customer_name: ticket.bookings?.user_name,
+            customer_email: ticket.bookings?.user_email,
+            event_title: ticket.bookings?.events?.title,
+            event_date: ticket.bookings?.events?.date,
+            checked_in_at: ticket.checked_in_at
           }
-        }
-        
-        setVerificationResult(result)
-        
-        // Refresh recent verifications
-        fetchRecentVerifications()
+        })
       } else {
-        setVerificationResult({
-          verified: false,
+        setResult({
+          success: false,
           message: 'No ticket found with this ID/Number'
         })
       }
+
     } catch (error) {
       console.error('Verification error:', error)
-      setVerificationResult({
-        verified: false,
+      setResult({
+        success: false,
         message: 'Error verifying ticket. Please try again.'
       })
     } finally {
-      setLoading(false)
+      setIsVerifying(false)
     }
   }
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (searchInput.trim()) {
-      verifyTicket(searchInput.trim())
-    }
+  const handleScanQR = () => {
+    // This would open camera for QR scanning
+    alert('QR Camera scanning will be implemented. For now, paste the QR code data in the input field.')
   }
 
-  const startScanner = async () => {
-    try {
-      setCameraError(null)
-      
-      // Check if camera is available
-      const devices = await Html5Qrcode.getCameras()
-      if (!devices || devices.length === 0) {
-        setCameraError("No camera found. Please use manual entry.")
-        return
-      }
-      
-      setScannerActive(true)
-      
-      // Wait for the DOM element to be created
-      setTimeout(async () => {
-        try {
-          const html5QrCode = new Html5Qrcode("qr-reader")
-          scannerRef.current = html5QrCode
-          
-          const config = {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
-          }
-          
-          // Try to use back camera first, fall back to any available camera
-          try {
-            await html5QrCode.start(
-              { facingMode: "environment" },
-              config,
-              (decodedText) => {
-                verifyTicket(decodedText)
-                stopScanner()
-              },
-              (errorMessage) => {
-                // Ignore continuous scan errors
-              }
-            )
-          } catch {
-            // If back camera fails, try with device ID
-            await html5QrCode.start(
-              devices[0].id,
-              config,
-              (decodedText) => {
-                verifyTicket(decodedText)
-                stopScanner()
-              },
-              (errorMessage) => {
-                // Ignore continuous scan errors
-              }
-            )
-          }
-          
-          setCameraError(null)
-        } catch (err: any) {
-          console.error("Error initializing scanner:", err)
-          setScannerActive(false)
-          
-          if (err.name === 'NotAllowedError') {
-            setCameraError("Camera permission denied. Please allow camera access and try again.")
-          } else if (err.name === 'NotFoundError') {
-            setCameraError("No camera found on this device.")
-          } else {
-            setCameraError("Unable to access camera. Please use manual entry.")
-          }
-        }
-      }, 100)
-    } catch (err) {
-      console.error("Error checking cameras:", err)
-      setScannerActive(false)
-      setCameraError("Unable to access camera. Please use manual entry.")
-    }
-  }
-
-  const stopScanner = () => {
-    if (scannerRef.current) {
-      scannerRef.current.stop().then(() => {
-        scannerRef.current = null
-        setScannerActive(false)
-      }).catch((error) => {
-        console.error("Error stopping scanner:", error)
-        setScannerActive(false)
-      })
+  const getStatusIcon = () => {
+    if (!result) return null
+    
+    if (result.success) {
+      return <CheckCircle className="h-8 w-8 text-green-500" />
     } else {
-      setScannerActive(false)
+      return <XCircle className="h-8 w-8 text-red-500" />
     }
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
+  const getStatusColor = () => {
+    if (!result) return ''
+    
+    if (result.success) {
+      return 'bg-green-50 border-green-200 text-green-800'
+    } else {
+      return 'bg-red-50 border-red-200 text-red-800'
+    }
   }
 
   return (
-    <UserFlowGuard requiredRole="admin">
-      <div className="min-h-screen bg-gray-50 py-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center gap-3">
-              <Shield className="h-8 w-8 text-[#0b6d41]" />
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Ticket Verifier</h1>
-                <p className="text-gray-600 mt-1">Verify printed tickets and check booking details</p>
-              </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* Desktop-Only Header */}
+      <div className="bg-white shadow-sm border-b hidden lg:block">
+        <div className="max-w-4xl mx-auto px-6 py-6">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <QrCode className="h-7 w-7 text-blue-600" />
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Verification Section */}
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-2xl shadow-lg p-6">
-                <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                  <QrCode className="h-6 w-6 text-[#ffde59]" />
-                  Verify Ticket
-                </h2>
-
-                {/* Search Form */}
-                <form onSubmit={handleSearch} className="mb-6">
-                  <div className="flex gap-3">
-                    <div className="flex-1 relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                      <input
-                        type="text"
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        placeholder="Enter Booking ID, Ticket Number, or scan QR code"
-                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent"
-                        disabled={loading || scannerActive}
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={loading || !searchInput.trim() || scannerActive}
-                      className="px-6 py-3 bg-[#0b6d41] text-white rounded-xl hover:bg-[#0a5d37] disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-                    >
-                      {loading ? 'Verifying...' : 'Verify'}
-                    </button>
-                  </div>
-                </form>
-
-                {/* QR Scanner Section */}
-                <div className="mb-6">
-                  {!scannerActive ? (
-                    <>
-                      <button
-                        onClick={startScanner}
-                        disabled={loading}
-                        className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-[#0b6d41] hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Camera className="h-5 w-5" />
-                        Click to scan QR code with camera
-                      </button>
-                      {cameraError && (
-                        <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                          <p className="text-sm text-yellow-800">{cameraError}</p>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="relative bg-gray-100 rounded-xl p-4">
-                      <div id="qr-reader" className="rounded-lg overflow-hidden" style={{ width: '100%', minHeight: '300px' }}></div>
-                      <button
-                        onClick={stopScanner}
-                        className="absolute top-6 right-6 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 z-10 shadow-lg"
-                      >
-                        <X className="h-5 w-5" />
-                      </button>
-                      <p className="text-center text-sm text-gray-600 mt-2">Position QR code within the frame</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Verification Result */}
-                {verificationResult && (
-                  <div className={`rounded-xl p-6 ${
-                    verificationResult.verified 
-                      ? verificationResult.ticket?.status === 'used'
-                        ? 'bg-yellow-50 border-2 border-yellow-200'
-                        : 'bg-green-50 border-2 border-green-200'
-                      : 'bg-red-50 border-2 border-red-200'
-                  }`}>
-                    <div className="flex items-start gap-4">
-                      {verificationResult.verified ? (
-                        verificationResult.ticket?.status === 'used' ? (
-                          <AlertCircle className="h-8 w-8 text-yellow-500 flex-shrink-0" />
-                        ) : (
-                          <CheckCircle className="h-8 w-8 text-green-500 flex-shrink-0" />
-                        )
-                      ) : (
-                        <XCircle className="h-8 w-8 text-red-500 flex-shrink-0" />
-                      )}
-                      
-                      <div className="flex-1">
-                        <h3 className={`text-lg font-bold mb-3 ${
-                          verificationResult.verified 
-                            ? verificationResult.ticket?.status === 'used'
-                              ? 'text-yellow-900'
-                              : 'text-green-900'
-                            : 'text-red-900'
-                        }`}>
-                          {verificationResult.message}
-                        </h3>
-                        
-                        {verificationResult.ticket && (
-                          <div className="space-y-4">
-                            {/* Ticket Info */}
-                            <div className="bg-white rounded-lg p-4">
-                              <h4 className="font-semibold text-gray-900 mb-3">Ticket Information</h4>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                <div className="flex items-center gap-2">
-                                  <Hash className="h-4 w-4 text-gray-400" />
-                                  <span className="text-gray-600">Ticket:</span>
-                                  <span className="font-mono font-semibold">{verificationResult.ticket.ticket_number}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Ticket className="h-4 w-4 text-gray-400" />
-                                  <span className="text-gray-600">Status:</span>
-                                  <span className={`font-semibold ${
-                                    verificationResult.ticket.status === 'valid' ? 'text-green-600' : 'text-yellow-600'
-                                  }`}>
-                                    {verificationResult.ticket.status.toUpperCase()}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Event Info */}
-                            <div className="bg-white rounded-lg p-4">
-                              <h4 className="font-semibold text-gray-900 mb-3">Event Details</h4>
-                              <div className="space-y-2 text-sm">
-                                <div className="font-semibold text-lg text-gray-900">
-                                  {verificationResult.ticket.booking.event.title}
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <Calendar className="h-4 w-4 text-gray-400" />
-                                    <span>{formatDate(verificationResult.ticket.booking.event.date)}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Clock className="h-4 w-4 text-gray-400" />
-                                    <span>{verificationResult.ticket.booking.event.time}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 md:col-span-2">
-                                    <MapPin className="h-4 w-4 text-gray-400" />
-                                    <span>{verificationResult.ticket.booking.event.venue}, {verificationResult.ticket.booking.event.location}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Customer Info */}
-                            <div className="bg-white rounded-lg p-4">
-                              <h4 className="font-semibold text-gray-900 mb-3">Customer Information</h4>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                <div className="flex items-center gap-2">
-                                  <User className="h-4 w-4 text-gray-400" />
-                                  <span className="text-gray-600">Name:</span>
-                                  <span className="font-semibold">{verificationResult.ticket.booking.user_name}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-gray-600">Email:</span>
-                                  <span className="font-semibold">{verificationResult.ticket.booking.user_email}</span>
-                                </div>
-                                {verificationResult.ticket.booking.user_phone && (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-gray-600">Phone:</span>
-                                    <span className="font-semibold">{verificationResult.ticket.booking.user_phone}</span>
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-2">
-                                  <span className="text-gray-600">Quantity:</span>
-                                  <span className="font-semibold">{verificationResult.ticket.booking.quantity} tickets</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Recent Verifications */}
-            <div className="lg:col-span-1">
-              <div className="bg-white rounded-2xl shadow-lg p-6">
-                <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                  <Clock className="h-6 w-6 text-[#ffde59]" />
-                  Recent Check-ins
-                </h2>
-                
-                {recentVerifications.length > 0 ? (
-                  <div className="space-y-3">
-                    {recentVerifications.map((ticket) => (
-                      <div key={ticket.id} className="border-l-4 border-green-500 pl-4 py-2">
-                        <div className="text-sm font-semibold text-gray-900">
-                          {ticket.ticket_number}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          {ticket.bookings?.events?.title}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(ticket.checked_in_at).toLocaleString()}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-500 text-center py-8">No recent check-ins</p>
-                )}
-              </div>
-
-              {/* Statistics */}
-              <div className="bg-white rounded-2xl shadow-lg p-6 mt-6">
-                <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                  <Scan className="h-6 w-6 text-[#ffde59]" />
-                  Quick Stats
-                </h2>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Today&apos;s Verifications</span>
-                    <span className="text-2xl font-bold text-[#0b6d41]">
-                      {recentVerifications.filter(t => 
-                        new Date(t.checked_in_at).toDateString() === new Date().toDateString()
-                      ).length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Total Recent</span>
-                    <span className="text-2xl font-bold text-gray-900">
-                      {recentVerifications.length}
-                    </span>
-                  </div>
-                </div>
-              </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Ticket Verifier</h1>
+              <p className="text-gray-600">Verify printed tickets and check booking details</p>
             </div>
           </div>
         </div>
       </div>
-    </UserFlowGuard>
+
+      <div className="max-w-4xl mx-auto px-4 py-4 sm:py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
+          {/* Verification Form */}
+          <div className="lg:col-span-2 order-1 lg:order-1">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Verify Ticket</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Booking ID, Ticket Number, or scan QR code
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      value={ticketInput}
+                      onChange={(e) => setTicketInput(e.target.value)}
+                      placeholder="Enter ID or scan QR"
+                      className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      onKeyPress={(e) => e.key === 'Enter' && handleVerify()}
+                    />
+                    <button
+                      onClick={handleVerify}
+                      disabled={isVerifying}
+                      className="bg-blue-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium text-sm sm:text-base whitespace-nowrap"
+                    >
+                      {isVerifying ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          <span className="hidden sm:inline">Verifying...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Search className="h-4 w-4" />
+                          <span className="hidden sm:inline">Verify</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-center">
+                  <button
+                    onClick={handleScanQR}
+                    className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 text-gray-600 rounded-lg hover:border-gray-400 hover:text-gray-800 transition-colors"
+                  >
+                    <QrCode className="h-5 w-5" />
+                    Click to scan QR code with camera
+                  </button>
+                </div>
+              </div>
+
+              {/* Verification Result */}
+              {result && (
+                <div className={`mt-6 p-4 rounded-lg border ${getStatusColor()}`}>
+                  <div className="flex items-start gap-3">
+                    {getStatusIcon()}
+                    <div className="flex-1">
+                      <p className="font-medium">{result.message}</p>
+                      
+                      {result.ticket && (
+                        <div className="mt-3 space-y-2 text-sm">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            <div>
+                              <span className="font-medium text-xs sm:text-sm">Ticket Number:</span>
+                              <p className="text-sm sm:text-base break-all">{result.ticket.ticket_number}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-xs sm:text-sm">Status:</span>
+                              <p className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full mt-1 ${
+                                result.ticket.status === 'valid' 
+                                  ? 'bg-green-100 text-green-800'
+                                  : result.ticket.status === 'used'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}>
+                                {result.ticket.status}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-xs sm:text-sm">Customer:</span>
+                              <p className="text-sm sm:text-base">{result.ticket.customer_name}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-xs sm:text-sm">Email:</span>
+                              <p className="text-sm sm:text-base break-all">{result.ticket.customer_email}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-xs sm:text-sm">Event:</span>
+                              <p className="text-sm sm:text-base">{result.ticket.event_title}</p>
+                            </div>
+                            <div>
+                              <span className="font-medium text-xs sm:text-sm">Date:</span>
+                              <p className="text-sm sm:text-base">{result.ticket.event_date}</p>
+                            </div>
+                          </div>
+                          
+                          {result.ticket.checked_in_at && (
+                            <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 text-blue-600" />
+                                <span className="font-medium text-blue-800">
+                                  Checked in: {new Date(result.ticket.checked_in_at).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="space-y-4 sm:space-y-6 order-2 lg:order-2">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Quick Stats</h3>
+              <div className="space-y-3 sm:space-y-4">
+                <div className="flex justify-between">
+                  <span className="text-xs sm:text-sm text-gray-600">Today's Verifications</span>
+                  <span className="font-medium text-sm sm:text-base">0</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs sm:text-sm text-gray-600">Total Recent</span>
+                  <span className="font-medium text-sm sm:text-base">0</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Recent Check-ins</h3>
+              {recentCheckins.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">No recent check-ins</p>
+              ) : (
+                <div className="space-y-3">
+                  {recentCheckins.map((checkin, index) => (
+                    <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {checkin.ticket_number}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(checkin.created_at).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
