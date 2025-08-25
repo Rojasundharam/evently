@@ -25,23 +25,31 @@ export default function SignInPage() {
       setIsLoading(true)
       setError(null)
       
-      const redirectTo = searchParams.get('redirectTo') || '/'
+      // Determine the callback URL based on environment
+      let callbackUrl: string
       
-      // Use the actual site URL for production
-      const siteUrl = typeof window !== 'undefined' 
-        ? window.location.origin 
-        : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      if (typeof window !== 'undefined') {
+        // We're in the browser
+        const origin = window.location.origin
+        
+        // For production on Vercel
+        if (origin.includes('vercel.app') || origin.includes('evently-by-jicate')) {
+          callbackUrl = 'https://evently-by-jicate.vercel.app/api/auth/callback'
+        } else {
+          // For local development
+          callbackUrl = `${origin}/api/auth/callback`
+        }
+      } else {
+        // Fallback
+        callbackUrl = 'https://evently-by-jicate.vercel.app/api/auth/callback'
+      }
       
-      console.log('Initiating Google OAuth with redirect to:', `${siteUrl}/auth/callback`)
+      console.log('OAuth Callback URL:', callbackUrl)
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${siteUrl}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          }
+          redirectTo: callbackUrl
         }
       })
 
@@ -53,10 +61,9 @@ export default function SignInPage() {
       
       // Log the auth URL for debugging
       if (data?.url) {
-        console.log('OAuth URL:', data.url)
+        console.log('Full OAuth URL:', data.url)
       }
       
-      // Note: If successful, user will be redirected, so no need to setIsLoading(false)
     } catch (err) {
       setError('Failed to sign in with Google. Please try again.')
       console.error('Google auth error:', err)
