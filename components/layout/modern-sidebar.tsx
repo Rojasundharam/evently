@@ -17,7 +17,8 @@ import {
   Settings,
   ChevronDown,
   Mail,
-  LogOut
+  LogOut,
+  CheckCircle
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -44,6 +45,7 @@ const adminNavigation = [
   { name: 'Admin Users', href: '/admin/users', icon: Users },
   { name: 'Admin Payments', href: '/admin/payments', icon: CreditCard },
   { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
+  { name: 'Verify Tickets', href: '/admin/verify-tickets', icon: CheckCircle },
 ]
 
 interface ModernSidebarProps {
