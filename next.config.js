@@ -25,7 +25,9 @@ const nextConfig = {
         hostname: 'via.placeholder.com',
       }
     ]
-  }
+  },
+  // Skip static generation for pages that require environment variables
+  output: 'standalone'
 }
 
 module.exports = nextConfig
