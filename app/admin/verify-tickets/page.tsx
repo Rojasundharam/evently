@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Html5Qrcode } from 'html5-qrcode'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import { 
   QrCode, 
   CheckCircle, 
@@ -56,15 +56,26 @@ export default function VerifyTicketsPage() {
   const [loading, setLoading] = useState(false)
   const [scannerActive, setScannerActive] = useState(false)
   const [recentVerifications, setRecentVerifications] = useState<any[]>([])
+  const [cameraError, setCameraError] = useState<string | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
     fetchRecentVerifications()
+    
+    // Cleanup function
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(console.error)
+        try {
+          scannerRef.current.stop().catch(() => {
+            // Ignore errors during cleanup
+          })
+        } catch {
+          // Ignore cleanup errors
+        }
+        scannerRef.current = null
       }
+      setScannerActive(false)
     }
   }, [])
 
@@ -196,34 +207,90 @@ export default function VerifyTicketsPage() {
 
   const startScanner = async () => {
     try {
-      const html5QrCode = new Html5Qrcode("qr-reader")
-      scannerRef.current = html5QrCode
+      setCameraError(null)
       
-      await html5QrCode.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
-        },
-        (decodedText) => {
-          verifyTicket(decodedText)
-          stopScanner()
-        },
-        () => {} // Ignore errors
-      )
+      // Check if camera is available
+      const devices = await Html5Qrcode.getCameras()
+      if (!devices || devices.length === 0) {
+        setCameraError("No camera found. Please use manual entry.")
+        return
+      }
       
       setScannerActive(true)
+      
+      // Wait for the DOM element to be created
+      setTimeout(async () => {
+        try {
+          const html5QrCode = new Html5Qrcode("qr-reader")
+          scannerRef.current = html5QrCode
+          
+          const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
+          }
+          
+          // Try to use back camera first, fall back to any available camera
+          try {
+            await html5QrCode.start(
+              { facingMode: "environment" },
+              config,
+              (decodedText) => {
+                verifyTicket(decodedText)
+                stopScanner()
+              },
+              (errorMessage) => {
+                // Ignore continuous scan errors
+              }
+            )
+          } catch {
+            // If back camera fails, try with device ID
+            await html5QrCode.start(
+              devices[0].id,
+              config,
+              (decodedText) => {
+                verifyTicket(decodedText)
+                stopScanner()
+              },
+              (errorMessage) => {
+                // Ignore continuous scan errors
+              }
+            )
+          }
+          
+          setCameraError(null)
+        } catch (err: any) {
+          console.error("Error initializing scanner:", err)
+          setScannerActive(false)
+          
+          if (err.name === 'NotAllowedError') {
+            setCameraError("Camera permission denied. Please allow camera access and try again.")
+          } else if (err.name === 'NotFoundError') {
+            setCameraError("No camera found on this device.")
+          } else {
+            setCameraError("Unable to access camera. Please use manual entry.")
+          }
+        }
+      }, 100)
     } catch (err) {
-      console.error("Error starting scanner:", err)
-      alert("Unable to access camera. Please use manual entry.")
+      console.error("Error checking cameras:", err)
+      setScannerActive(false)
+      setCameraError("Unable to access camera. Please use manual entry.")
     }
   }
 
   const stopScanner = () => {
     if (scannerRef.current) {
       scannerRef.current.stop().then(() => {
+        scannerRef.current = null
         setScannerActive(false)
-      }).catch(console.error)
+      }).catch((error) => {
+        console.error("Error stopping scanner:", error)
+        setScannerActive(false)
+      })
+    } else {
+      setScannerActive(false)
     }
   }
 
@@ -287,22 +354,31 @@ export default function VerifyTicketsPage() {
                 {/* QR Scanner Section */}
                 <div className="mb-6">
                   {!scannerActive ? (
-                    <button
-                      onClick={startScanner}
-                      className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-[#0b6d41] hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-gray-600"
-                    >
-                      <Camera className="h-5 w-5" />
-                      Click to scan QR code with camera
-                    </button>
+                    <>
+                      <button
+                        onClick={startScanner}
+                        disabled={loading}
+                        className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-[#0b6d41] hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Camera className="h-5 w-5" />
+                        Click to scan QR code with camera
+                      </button>
+                      {cameraError && (
+                        <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <p className="text-sm text-yellow-800">{cameraError}</p>
+                        </div>
+                      )}
+                    </>
                   ) : (
-                    <div className="relative">
-                      <div id="qr-reader" className="rounded-xl overflow-hidden"></div>
+                    <div className="relative bg-gray-100 rounded-xl p-4">
+                      <div id="qr-reader" className="rounded-lg overflow-hidden" style={{ width: '100%', minHeight: '300px' }}></div>
                       <button
                         onClick={stopScanner}
-                        className="absolute top-4 right-4 p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
+                        className="absolute top-6 right-6 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 z-10 shadow-lg"
                       >
                         <X className="h-5 w-5" />
                       </button>
+                      <p className="text-center text-sm text-gray-600 mt-2">Position QR code within the frame</p>
                     </div>
                   )}
                 </div>
