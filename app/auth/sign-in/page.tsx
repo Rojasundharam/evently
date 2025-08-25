@@ -26,17 +26,36 @@ export default function SignInPage() {
       setError(null)
       
       const redirectTo = searchParams.get('redirectTo') || '/'
-      const { error } = await supabase.auth.signInWithOAuth({
+      
+      // Use the actual site URL for production
+      const siteUrl = typeof window !== 'undefined' 
+        ? window.location.origin 
+        : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      
+      console.log('Initiating Google OAuth with redirect to:', `${siteUrl}/auth/callback`)
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`
+          redirectTo: `${siteUrl}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
         }
       })
 
       if (error) {
+        console.error('OAuth error:', error)
         setError(error.message)
         setIsLoading(false)
       }
+      
+      // Log the auth URL for debugging
+      if (data?.url) {
+        console.log('OAuth URL:', data.url)
+      }
+      
       // Note: If successful, user will be redirected, so no need to setIsLoading(false)
     } catch (err) {
       setError('Failed to sign in with Google. Please try again.')

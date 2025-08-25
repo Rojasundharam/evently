@@ -11,7 +11,9 @@ Instead of:
 https://evently-by-jicate.vercel.app/auth/callback?code=...
 ```
 
-## Solution: Configure Supabase Dashboard
+## CRITICAL FIX REQUIRED IN SUPABASE DASHBOARD
+
+### ⚠️ IMPORTANT: You MUST configure these settings in Supabase Dashboard
 
 ### Step 1: Go to Supabase Dashboard
 1. Go to https://supabase.com/dashboard
@@ -66,11 +68,21 @@ Click **Save** to apply the configuration.
    - Click "Sign in with Google"
    - You should be redirected back to your app after authentication
 
-## Environment Variables
-Make sure these are set in Vercel:
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (if using server-side features)
+## Environment Variables in Vercel
+
+### CRITICAL: Update these in Vercel Dashboard
+1. Go to your Vercel project settings
+2. Navigate to Environment Variables
+3. Add/Update these variables:
+
+```
+NEXT_PUBLIC_APP_URL = https://evently-by-jicate.vercel.app
+NEXT_PUBLIC_SUPABASE_URL = https://sdkdimqmzunfmyawtqfy.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY = [your anon key]
+SUPABASE_SERVICE_ROLE_KEY = [your service role key]
+```
+
+⚠️ **IMPORTANT**: The `NEXT_PUBLIC_APP_URL` MUST be set to your Vercel URL, not localhost!
 
 ## Important Notes
 - The callback URL in your OAuth provider settings (Google) should match exactly
