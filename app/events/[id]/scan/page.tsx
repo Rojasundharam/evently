@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import MobileQRScanner from '@/components/qr/mobile-qr-scanner'
+import ClientTimeDisplay from '@/components/ui/client-time-display'
 
 interface ScanResult {
   success: boolean
@@ -277,9 +278,7 @@ export default function ScanTicketsPage() {
                         <p className="text-xs text-gray-600 truncate">
                           {scan.ticket_info?.customer_name || scan.message}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          {new Date().toLocaleTimeString()}
-                        </p>
+                        <ClientTimeDisplay />
                       </div>
                     </div>
                   ))}

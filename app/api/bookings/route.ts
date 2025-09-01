@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { bookingFormSchema } from '@/lib/validations/booking'
+import { hasEventSeatAllocation, allocateSeatsForBooking } from '@/lib/seat-management'
 
 export async function GET(request: NextRequest) {
   try {
@@ -159,6 +160,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check if event has seat allocation enabled and allocate seats
+    const hasSeatAllocation = await hasEventSeatAllocation(event_id)
+    let allocatedSeats = []
+    
+    if (hasSeatAllocation) {
+      try {
+        console.log(`Allocating ${validatedData.quantity} seats for booking ${booking.id}`)
+        allocatedSeats = await allocateSeatsForBooking(
+          booking.id,
+          event_id,
+          validatedData.quantity
+        )
+        console.log(`Successfully allocated seats:`, allocatedSeats)
+      } catch (seatError) {
+        console.error('Error allocating seats:', seatError)
+        // Don't fail the booking, but log the error
+        // In production, you might want to handle this more gracefully
+      }
+    }
+
     // Update event attendee count
     const { error: updateError } = await supabase
       .from('events')
@@ -172,7 +193,12 @@ export async function POST(request: NextRequest) {
       // Note: In production, you'd want to handle this with a transaction
     }
 
-    return NextResponse.json({ booking }, { status: 201 })
+    return NextResponse.json({ 
+      booking: {
+        ...booking,
+        allocated_seats: allocatedSeats
+      }
+    }, { status: 201 })
   } catch (error) {
     if (error instanceof Error && error.name === 'ZodError') {
       return NextResponse.json(

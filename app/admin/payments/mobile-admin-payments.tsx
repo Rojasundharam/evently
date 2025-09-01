@@ -25,7 +25,7 @@ async function getAdminPaymentData() {
   }
 
   // Get all payments with booking and event details
-  const { data: payments, error } = await supabase
+  let { data: payments, error } = await supabase
     .from('payments')
     .select(`
       *,
@@ -38,7 +38,7 @@ async function getAdminPaymentData() {
         events (
           id,
           title,
-          date,
+          start_date,
           venue,
           organizer_id,
           profiles (
@@ -51,8 +51,76 @@ async function getAdminPaymentData() {
     .order('created_at', { ascending: false })
 
   if (error) {
-    console.error('Error fetching payments:', error)
-    return { payments: [], stats: { total: 0, completed: 0, failed: 0, pending: 0, totalRevenue: 0 } }
+    console.error('Error fetching payments with relations:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint
+    })
+    
+    // Try a simpler query without deep relations
+    const { data: simplePayments, error: simpleError } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (simpleError) {
+      console.error('Error fetching simple payments:', {
+        message: simpleError.message,
+        code: simpleError.code,
+        details: simpleError.details,
+        hint: simpleError.hint
+      })
+      return { payments: [], stats: { total: 0, completed: 0, failed: 0, pending: 0, totalRevenue: 0 } }
+    }
+    
+    // If simple query works, fetch related data separately
+    if (simplePayments && simplePayments.length > 0) {
+      const bookingIds = [...new Set(simplePayments.map(p => p.booking_id).filter(Boolean))]
+      
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          user_email,
+          user_name,
+          quantity,
+          total_amount,
+          event_id
+        `)
+        .in('id', bookingIds)
+      
+      const bookingsMap = new Map(bookings?.map(b => [b.id, b]) || [])
+      
+      // Fetch events separately if we have bookings
+      if (bookings && bookings.length > 0) {
+        const eventIds = [...new Set(bookings.map(b => b.event_id).filter(Boolean))]
+        const { data: events } = await supabase
+          .from('events')
+          .select('id, title, start_date, venue, organizer_id')
+          .in('id', eventIds)
+        
+        const eventsMap = new Map(events?.map(e => [e.id, e]) || [])
+        
+        // Combine the data
+        payments = simplePayments.map(payment => {
+          const booking = bookingsMap.get(payment.booking_id)
+          const event = booking ? eventsMap.get(booking.event_id) : null
+          
+          return {
+            ...payment,
+            bookings: booking ? {
+              ...booking,
+              events: event || null
+            } : null
+          }
+        })
+      } else {
+        payments = simplePayments
+      }
+    } else {
+      payments = []
+    }
   }
 
   // Calculate stats
@@ -72,45 +140,25 @@ export default async function MobileAdminPaymentsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile Header */}
-      <div className="bg-white shadow-sm border-b lg:hidden">
-        <div className="px-4 py-4">
+      <div className="p-4 lg:p-6 max-w-7xl mx-auto">
+        {/* Page Header */}
+        <div className="mb-6 lg:mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-bold text-gray-900">Admin Payments</h1>
-              <p className="text-sm text-gray-600">Manage all payments</p>
+              <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">Payment Management</h1>
+              <p className="text-gray-600 mt-1 lg:mt-2">Monitor and manage all platform payments</p>
             </div>
-            <div className="flex items-center gap-2">
-              <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+            <div className="flex items-center gap-2 lg:gap-4">
+              <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 lg:hidden">
                 <Filter className="h-5 w-5" />
               </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                <Download className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop Header */}
-      <div className="bg-white shadow-sm border-b hidden lg:block">
-        <div className="px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Payment Management</h1>
-              <p className="text-gray-600 mt-2">Monitor and manage all platform payments</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <button className="flex items-center gap-2 px-4 py-2 bg-[#0b6d41] text-white rounded-xl hover:bg-[#0a5d37] transition-colors">
+              <button className="flex items-center gap-2 px-3 py-2 lg:px-4 bg-[#0b6d41] text-white rounded-xl hover:bg-[#0a5d37] transition-colors text-sm lg:text-base">
                 <Download className="h-4 w-4" />
-                Export Data
+                <span className="hidden lg:inline">Export Data</span>
               </button>
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="p-4 lg:p-6 max-w-7xl mx-auto">
         {/* Stats Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6 mb-6 lg:mb-8">
           <div className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm border border-gray-100">

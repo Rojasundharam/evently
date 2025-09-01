@@ -209,7 +209,7 @@ export default async function MobileOrganizerPage() {
             </div>
           </div>
         ) : (
-          <MyEventsClient initialEvents={events} user={user} />
+          <MyEventsClient events={events} />
         )}
       </div>
     </div>

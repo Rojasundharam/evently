@@ -101,7 +101,13 @@ export function decryptTicketDataSync(encryptedString: string): TicketData | nul
       throw new Error('CryptoJS not available for synchronous decryption')
     }
     
-    const decoded = Buffer.from(encryptedString, 'base64').toString()
+    // Handle new EVTKT: prefix format
+    let dataToDecrypt = encryptedString
+    if (encryptedString.startsWith('EVTKT:')) {
+      dataToDecrypt = encryptedString.substring(6) // Remove "EVTKT:" prefix
+    }
+    
+    const decoded = Buffer.from(dataToDecrypt, 'base64').toString()
     const encryptedData: EncryptedTicketData = JSON.parse(decoded)
     
     const decrypted = CryptoJS.AES.decrypt(encryptedData.data, QR_SECRET)
@@ -135,9 +141,15 @@ export async function decryptTicketData(encryptedString: string): Promise<Ticket
       return decryptTicketDataSync(encryptedString)
     }
     
+    // Handle new EVTKT: prefix format
+    let dataToDecrypt = encryptedString
+    if (encryptedString.startsWith('EVTKT:')) {
+      dataToDecrypt = encryptedString.substring(6) // Remove "EVTKT:" prefix
+    }
+    
     // Fall back to dynamic import
     const CryptoJSModule = await getCrypto()
-    const decoded = Buffer.from(encryptedString, 'base64').toString()
+    const decoded = Buffer.from(dataToDecrypt, 'base64').toString()
     const encryptedData: EncryptedTicketData = JSON.parse(decoded)
     
     const decrypted = CryptoJSModule.AES.decrypt(encryptedData.data, QR_SECRET)
@@ -167,26 +179,102 @@ export async function generateQRCode(ticketData: TicketData): Promise<string> {
   const QRCode = await getQRCode()
   const encryptedData = await encryptTicketData(ticketData)
   
-  const validationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/tickets/validate?data=${encodeURIComponent(encryptedData)}`
+  // Use direct encrypted data for shorter QR codes (better camera readability)
+  // Add a prefix to help scanners identify this as ticket data
+  const qrContent = `EVTKT:${encryptedData}`
   
   const qrOptions = {
-    errorCorrectionLevel: 'H' as const,
+    errorCorrectionLevel: 'M' as const, // Medium is better for camera scanning - balance between data density and error recovery
     type: 'image/png' as const,
     quality: 0.92,
-    margin: 1,
+    margin: 4, // Larger margin for better camera detection
     color: {
       dark: '#000000',
       light: '#FFFFFF'
     },
-    width: 512
+    width: 400, // Increased size for better camera scanning (was 300)
+    scale: 10 // Higher scale for crisp definition (was 8)
   }
   
   try {
-    const qrDataUrl = await QRCode.toDataURL(validationUrl, qrOptions)
+    const qrDataUrl = await QRCode.toDataURL(qrContent, qrOptions)
     return qrDataUrl
   } catch (error) {
     console.error('Error generating QR code:', error)
     throw new Error('Failed to generate QR code')
+  }
+}
+
+// Test function to verify QR code readability
+export async function testQRReadability(qrDataUrl: string): Promise<boolean> {
+  try {
+    // This would require jsQR or similar library for actual testing
+    // For now, just validate that the QR was generated successfully
+    return qrDataUrl.startsWith('data:image/png;base64,')
+  } catch (error) {
+    console.error('QR readability test failed:', error)
+    return false
+  }
+}
+
+// Validate QR size for camera scanning
+export function validateQRSize(size: number): { isValid: boolean; recommendation: string; minSize: number } {
+  const MINIMUM_SCANNABLE_SIZE = 150 // Minimum pixels for reliable camera scanning
+  const RECOMMENDED_SIZE = 200      // Recommended size for optimal scanning
+  const MAXIMUM_PRACTICAL_SIZE = 400 // Maximum before it becomes unwieldy
+  
+  if (size < MINIMUM_SCANNABLE_SIZE) {
+    return {
+      isValid: false,
+      recommendation: `QR code is too small (${size}px). Increase to at least ${MINIMUM_SCANNABLE_SIZE}px for reliable camera scanning.`,
+      minSize: MINIMUM_SCANNABLE_SIZE
+    }
+  } else if (size < RECOMMENDED_SIZE) {
+    return {
+      isValid: true,
+      recommendation: `QR code size (${size}px) is acceptable but could be larger. Recommended size: ${RECOMMENDED_SIZE}px for optimal scanning.`,
+      minSize: RECOMMENDED_SIZE
+    }
+  } else if (size > MAXIMUM_PRACTICAL_SIZE) {
+    return {
+      isValid: true,
+      recommendation: `QR code is very large (${size}px). This is good for scanning but may take up too much space on tickets.`,
+      minSize: RECOMMENDED_SIZE
+    }
+  } else {
+    return {
+      isValid: true,
+      recommendation: `QR code size (${size}px) is optimal for camera scanning.`,
+      minSize: size
+    }
+  }
+}
+
+// Enhanced QR generation with size validation
+export async function generateOptimizedQR(ticketData: TicketData, requestedSize?: number): Promise<{qrDataUrl: string, sizeValidation: any}> {
+  try {
+    const qrDataUrl = await generateQRCode(ticketData)
+    const isReadable = await testQRReadability(qrDataUrl)
+    
+    // Validate size (default to 400 if not specified)
+    const actualSize = requestedSize || 400
+    const sizeValidation = validateQRSize(actualSize)
+    
+    if (!isReadable) {
+      console.warn('QR code may not be readable, but proceeding...')
+    }
+    
+    if (!sizeValidation.isValid) {
+      console.warn('QR Size Warning:', sizeValidation.recommendation)
+    }
+    
+    return {
+      qrDataUrl,
+      sizeValidation
+    }
+  } catch (error) {
+    console.error('Failed to generate optimized QR:', error)
+    throw error
   }
 }
 

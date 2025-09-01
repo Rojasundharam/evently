@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateQRCode, generateTicketNumber, TicketData } from '@/lib/qr-generator'
+import { encryptQRData, generateQRCodeDataURL, QRCodeData } from '@/lib/qr-code'
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,11 +18,12 @@ export async function POST(request: NextRequest) {
     // Get user profile with role
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, full_name')
       .eq('id', user.id)
       .single()
     
     const userRole = profile?.role || 'user'
+    const userName = profile?.full_name || 'Guest'
 
     const { bookingId } = await request.json()
     
@@ -36,7 +38,22 @@ export async function POST(request: NextRequest) {
       .from('bookings')
       .select(`
         *,
-        events (*)
+        events (
+          *,
+          ticket_template
+        ),
+        booking_seats (
+          seat_id,
+          attendee_name,
+          attendee_email,
+          event_seats (
+            seat_number,
+            row_number,
+            section,
+            seat_type,
+            zone
+          )
+        )
       `)
       .eq('id', bookingId)
       .eq('user_id', user.id)
@@ -62,24 +79,27 @@ export async function POST(request: NextRequest) {
       .eq('booking_id', bookingId)
 
     if (existingTickets && existingTickets.length > 0) {
+      // Regenerate QR codes for existing tickets with proper encryption
       const ticketsWithQR = await Promise.all(
         existingTickets.map(async (ticket) => {
-          const ticketData: TicketData = {
+          // Create QR data with encryption
+          const qrData: QRCodeData = {
             ticketId: ticket.id,
             eventId: ticket.event_id,
             bookingId: ticket.booking_id,
-            userId: user.id,
             ticketNumber: ticket.ticket_number,
-            ticketType: ticket.ticket_type,
-            eventDate: booking.events.date,
+            timestamp: Date.now()
           }
           
-          const qrCode = await generateQRCode(ticketData)
+          // Encrypt QR data
+          const encryptedData = await encryptQRData(qrData)
+          const qrCodeImage = await generateQRCodeDataURL(encryptedData)
           
           return {
             ...ticket,
-            qr_code_image: qrCode,
-            event: booking.events
+            qr_code_image: qrCodeImage,
+            event: booking.events,
+            encrypted_qr: encryptedData
           }
         })
       )
@@ -90,38 +110,115 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Generate new tickets
     const tickets = []
+    const ticketTemplate = booking.events.ticket_template || {}
+    const allocatedSeats = booking.booking_seats || []
+    
     for (let i = 0; i < booking.quantity; i++) {
       const ticketNumber = generateTicketNumber(booking.event_id)
+      const ticketId = crypto.randomUUID()
       
-      const ticketData: TicketData = {
-        ticketId: `temp-${i}`,
+      // Get seat information if available
+      const seatInfo = allocatedSeats[i]
+      const seatNumber = seatInfo?.event_seats?.seat_number || 
+                        (ticketTemplate.seatAllocation === 'specific' ? `${i + 1}` : null)
+      const rowNumber = seatInfo?.event_seats?.row_number || null
+      const section = seatInfo?.event_seats?.section || null
+      const zone = seatInfo?.event_seats?.zone || null
+      
+      // Create QR code data with seat information
+      const qrData: QRCodeData = {
+        ticketId: ticketId,
         eventId: booking.event_id,
         bookingId: bookingId,
-        userId: user.id,
         ticketNumber: ticketNumber,
-        ticketType: 'General Admission',
-        eventDate: booking.events.date,
+        seatNumber: seatNumber,
+        section: section,
+        row: rowNumber,
+        timestamp: Date.now()
       }
       
-      const qrCodeData = await generateQRCode(ticketData)
+      // Encrypt QR data
+      const encryptedQRData = await encryptQRData(qrData)
+      const qrCodeImage = await generateQRCodeDataURL(encryptedQRData)
+      
+      // Determine ticket type (from template or default)
+      const ticketType = ticketTemplate.ticketTypes?.[0]?.name || 'General Admission'
+      
+      // Create comprehensive metadata including template data
+      const metadata = {
+        // User information
+        user_name: booking.user_name || userName,
+        user_email: booking.user_email || user.email,
+        user_phone: booking.user_phone || '',
+        user_role: userRole,
+        
+        // Seat information
+        seat_number: seatNumber,
+        row_number: rowNumber,
+        section: section,
+        zone: zone,
+        seat_id: seatInfo?.seat_id || null,
+        
+        // Event information
+        event_title: booking.events.title,
+        event_date: booking.events.date,
+        event_time: booking.events.time,
+        venue: booking.events.venue,
+        location: booking.events.location,
+        
+        // Ticket template information
+        theme_color: ticketTemplate.themeColor || '#0b6d41',
+        secondary_color: ticketTemplate.secondaryColor || '#15a862',
+        layout_style: ticketTemplate.layoutStyle || 'modern',
+        
+        // Security features
+        watermark_enabled: ticketTemplate.enableWatermark || true,
+        hologram_enabled: ticketTemplate.enableHologram || false,
+        verification_method: ticketTemplate.verificationMethod || 'qr',
+        
+        // Pricing information
+        price: booking.events.price || 0,
+        currency: ticketTemplate.currency || 'INR',
+        payment_status: booking.payment_status,
+        
+        // Terms and conditions
+        refund_policy: ticketTemplate.refundPolicy || 'no-refunds',
+        age_restriction: ticketTemplate.ageRestriction || null,
+        id_proof_required: ticketTemplate.idProofRequired || true,
+        non_transferable: ticketTemplate.nonTransferable || true,
+        additional_terms: ticketTemplate.additionalTerms || [],
+        
+        // Organization information
+        organizer_name: ticketTemplate.organizerName || booking.events.organizer_name || '',
+        organizer_contact: ticketTemplate.organizerContact || '',
+        organizer_email: ticketTemplate.organizerEmail || '',
+        
+        // Social media
+        social_media: ticketTemplate.socialMedia || {},
+        
+        // Generation information
+        generated_at: new Date().toISOString(),
+        generated_by: user.id,
+        qr_encrypted: encryptedQRData
+      }
       
       const { data: newTicket, error: ticketError } = await supabase
         .from('tickets')
         .insert({
+          id: ticketId,
           booking_id: bookingId,
           event_id: booking.event_id,
           ticket_number: ticketNumber,
-          qr_code: ticketNumber,
+          qr_code: encryptedQRData, // Store encrypted QR data
           status: 'valid',
-          ticket_type: 'General Admission',
-          metadata: {
-            user_name: booking.user_name,
-            user_email: booking.user_email,
-            user_role: userRole,
-            generated_at: new Date().toISOString(),
-            generated_by: user.id
-          }
+          ticket_type: ticketType,
+          seat_number: seatNumber,
+          row_number: rowNumber,
+          section: section,
+          zone: zone,
+          metadata: metadata
         })
         .select()
         .single()
@@ -131,18 +228,11 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      ticketData.ticketId = newTicket.id
-      const finalQRCode = await generateQRCode(ticketData)
-      
-      const { error: updateError } = await supabase
-        .from('tickets')
-        .update({ qr_code: newTicket.id })
-        .eq('id', newTicket.id)
-
       tickets.push({
         ...newTicket,
-        qr_code_image: finalQRCode,
-        event: booking.events
+        qr_code_image: qrCodeImage,
+        event: booking.events,
+        ticket_template: ticketTemplate
       })
     }
 

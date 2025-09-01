@@ -15,6 +15,16 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   trailingSlash: false,
+  // Configure webpack to handle PDF.js properly
+  webpack: (config, { isServer }) => {
+    // Disable canvas for client-side builds since PDF.js doesn't need it
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvas: false,
+    }
+    
+    return config
+  }
 }
 
 module.exports = nextConfig

@@ -26,7 +26,7 @@ interface Payment {
     events: {
       id: string
       title: string
-      date: string
+      start_date: string
       time: string
       venue: string
       location: string
@@ -35,7 +35,7 @@ interface Payment {
         full_name: string | null
         email: string
       }
-    }
+    } | null
   }
 }
 

@@ -54,32 +54,36 @@ export default function TicketTemplate({ ticket, onDownload }: TicketTemplatePro
 
   const handleDownload = async () => {
     try {
-      // Dynamic import to avoid SSR issues
-      const html2canvas = (await import('html2canvas')).default
-      const jsPDF = (await import('jspdf')).default
-
-      const element = document.getElementById(`ticket-${ticket.id}`)
-      if (!element) return
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        backgroundColor: '#ffffff'
+      // Use the new enhanced ticket template download API
+      const response = await fetch('/api/tickets/download-with-template', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ticketId: ticket.id,
+          format: 'pdf'
+        })
       })
 
-      const imgData = canvas.toDataURL('image/png')
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: [200, 100] // Ticket size
-      })
+      if (!response.ok) {
+        throw new Error('Failed to download ticket')
+      }
 
-      pdf.addImage(imgData, 'PNG', 0, 0, 200, 100)
-      pdf.save(`ticket-${ticket.ticket_number}.pdf`)
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ticket-${ticket.ticket_number}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
 
       onDownload?.()
     } catch (error) {
-      console.error('Error generating PDF:', error)
-      alert('Failed to generate PDF. Please try printing instead.')
+      console.error('Error downloading ticket:', error)
+      alert('Failed to download ticket. Please try again.')
     }
   }
 

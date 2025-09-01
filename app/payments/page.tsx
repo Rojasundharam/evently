@@ -3,8 +3,6 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { formatDate, formatPrice } from '@/lib/utils'
 import { CheckCircle, XCircle, Clock, RefreshCw, ArrowLeft } from 'lucide-react'
-import AuthButton from '@/components/auth-button'
-import UserFlowGuard from '@/components/auth/user-flow-guard'
 
 async function getPaymentHistory() {
   const supabase = await createClient()
@@ -22,7 +20,11 @@ async function getPaymentHistory() {
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'organizer' && profile?.role !== 'admin') {
+  if (profile?.role !== 'organizer') {
+    // If user is admin, redirect to admin payments page
+    if (profile?.role === 'admin') {
+      redirect('/admin/payments')
+    }
     redirect('/bookings')
   }
 
@@ -95,34 +97,7 @@ export default async function PaymentsPage() {
   }
 
   return (
-    <UserFlowGuard requiredRole="organizer">
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <Link href="/" className="text-2xl font-bold text-gray-900">
-              Evently
-            </Link>
-            <div className="flex items-center space-x-4">
-              <Link
-                href="/events"
-                className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                Events
-              </Link>
-              <Link
-                href="/bookings"
-                className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                Bookings
-              </Link>
-              <AuthButton />
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="mb-6">
           <Link
@@ -251,7 +226,6 @@ export default async function PaymentsPage() {
           )}
         </div>
       </div>
-      </div>
-    </UserFlowGuard>
+    </div>
   )
 }

@@ -26,7 +26,7 @@ export function OrganizerDashboard() {
       const { data, error } = await supabase
         .from('organizer_dashboard')
         .select('*')
-        .order('date', { ascending: false })
+        .order('start_date', { ascending: false })
 
       if (error) throw error
       

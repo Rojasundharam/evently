@@ -1,8 +1,11 @@
 'use client'
 
-import { ReactNode, useEffect, useState } from 'react'
+import { ReactNode, useEffect, useState, Suspense, lazy } from 'react'
 import { MagicalCursor } from './magical-cursor'
 import { ImmersiveBackground } from './immersive-background'
+
+// Lazy load footer
+const Footer = lazy(() => import('@/components/layout/footer'))
 
 interface EnhancedLayoutProps {
   children: ReactNode
@@ -67,7 +70,13 @@ export function EnhancedLayout({
       <div className={`relative z-10 transition-all duration-700 ${
         isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
       }`}>
-        {children}
+        <div className="pb-8">
+          {children}
+        </div>
+        {/* Footer */}
+        <Suspense fallback={null}>
+          <Footer />
+        </Suspense>
       </div>
       
       {/* Ambient Lighting Effects */}

@@ -156,13 +156,19 @@ export function UserManagement() {
         throw new Error(data.error || 'Failed to update role')
       }
 
-      // Update local state
-      setUsers(users.map(user => 
-        user.id === userId ? { ...user, role: newRole } : user
-      ))
+      // Show success message
+      console.log(`✅ Role updated successfully to ${newRole}`)
       
-      // Show success message (optional)
-      console.log(data.message)
+      // Refresh the users list to ensure we have the latest data
+      await fetchUsers()
+      
+      // Show success notification with additional info if reauth is required
+      if (data.requiresReauth) {
+        alert(`User role updated to ${newRole}. The user needs to log out and log back in to see the changes take effect.`)
+      } else {
+        alert(`User role updated to ${newRole}. The user will see the changes after refreshing their page.`)
+      }
+      
     } catch (err) {
       console.error('Error updating user role:', err)
       setError(err instanceof Error ? err.message : 'Failed to update user role')

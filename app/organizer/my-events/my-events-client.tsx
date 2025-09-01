@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Search, Calendar, IndianRupee, Eye, Edit, MoreHorizontal } from 'lucide-react'
 import { formatDate, formatPrice } from '@/lib/utils'
+import { BulkEventUpload } from '@/components/organizer/bulk-event-upload'
 
 interface Event {
   id: string
@@ -30,16 +32,25 @@ interface Event {
 }
 
 interface MyEventsClientProps {
-  events: Event[]
+  events?: Event[]
 }
 
 export default function MyEventsClient({ events }: MyEventsClientProps) {
+  const router = useRouter()
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('date')
 
+  const handleBulkUploadSuccess = () => {
+    // Refresh the page to show new events
+    router.refresh()
+  }
+
+  // Ensure events is always an array
+  const safeEvents = events || []
+
   // Filter and sort events
-  const filteredEvents = events
+  const filteredEvents = safeEvents
     .filter(event => {
       const matchesSearch = event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            event.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -115,6 +126,8 @@ export default function MyEventsClient({ events }: MyEventsClientProps) {
               <option value="attendees">Sort by Attendees</option>
               <option value="bookings">Sort by Bookings</option>
             </select>
+            
+            <BulkEventUpload onUploadSuccess={handleBulkUploadSuccess} />
           </div>
         </div>
       </div>
