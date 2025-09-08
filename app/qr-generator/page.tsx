@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { QrCode, Download, RefreshCw, Copy, Settings, Palette } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { QrCode, Download, RefreshCw, Copy, Settings, Palette, Eye } from 'lucide-react'
 import QRCode from 'qrcode'
+import jsPDF from 'jspdf'
+import TicketTemplate, { TicketData } from '@/components/tickets/TicketTemplate'
 
 export default function QRGeneratorPage() {
   const [inputText, setInputText] = useState('')
@@ -10,7 +12,66 @@ export default function QRGeneratorPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [existingQRCodes, setExistingQRCodes] = useState<any[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [ticketData, setTicketData] = useState<TicketData | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Fix hydration mismatch by only rendering date on client
+  useEffect(() => {
+    setMounted(true)
+    fetchQRHistory()
+  }, [])
+
+  const fetchQRHistory = async () => {
+    try {
+      setLoadingHistory(true)
+      const response = await fetch('/api/qr-generator/history')
+      if (response.ok) {
+        const data = await response.json()
+        setExistingQRCodes(data.qrCodes || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch QR history:', error)
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const generateTicketData = (qrText: string): TicketData => {
+    const uniqueId = generateUniqueId()
+    return {
+      // Event Information
+      eventName: 'QR Generated Event',
+      eventDate: new Date().toLocaleDateString(),
+      eventTime: new Date().toLocaleTimeString(),
+      venue: 'Digital Venue',
+      
+      // Ticket Information
+      ticketNumber: `QR-${uniqueId}`,
+      ticketType: 'General',
+      
+      // Attendee Information
+      attendeeName: 'QR Code Holder',
+      registrationId: `REG-${uniqueId}`,
+      
+      // Pricing Information
+      price: 'Free',
+      paymentStatus: 'Complimentary',
+      
+      // Organization Information
+      organizerName: 'Evently Platform',
+      organizerContact: 'support@evently.com',
+      
+      // Security
+      qrData: qrText,
+      
+      // Terms & Conditions
+      nonTransferable: false,
+      idRequired: false
+    }
+  }
 
   // QR Code settings
   const [settings, setSettings] = useState({
@@ -84,6 +145,10 @@ export default function QRGeneratorPage() {
       const result = await response.json()
       setQrCodeDataUrl(result.qrCode)
       
+      // Generate ticket data for preview with the actual QR text
+      const ticket = generateTicketData(textToGenerate)
+      setTicketData(ticket)
+      
       console.log('QR Code generated and stored:', {
         text: textToGenerate,
         qrCodeId: result.qrCodeId,
@@ -94,6 +159,8 @@ export default function QRGeneratorPage() {
       // Show success message if stored in database
       if (result.info.storedInDb) {
         console.log('✅ QR code stored in database for verification tracking')
+        // Refresh QR history to show the new QR code
+        fetchQRHistory()
       }
       
     } catch (err) {
@@ -110,18 +177,46 @@ export default function QRGeneratorPage() {
     await generateQRCode(uniqueText)
   }
 
-  const downloadQRCode = () => {
-    if (!qrCodeDataUrl) {
-      setError('No QR code to download')
+  const downloadQRCode = async () => {
+    if (!ticketData) {
+      setError('No ticket data to download')
       return
     }
 
-    const link = document.createElement('a')
-    link.href = qrCodeDataUrl
-    link.download = `qr-code-${Date.now()}.png`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    try {
+      // Dynamic import to avoid SSR issues
+      const html2canvas = (await import('html2canvas')).default
+
+      const ticketElement = document.getElementById('qr-ticket-preview')
+      if (!ticketElement) {
+        setError('Ticket preview not found')
+        return
+      }
+
+      // Generate canvas from ticket element
+      const canvas = await html2canvas(ticketElement, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        allowTaint: true
+      })
+
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: [200, 100] // Ticket size
+      })
+
+      const imgData = canvas.toDataURL('image/png')
+      pdf.addImage(imgData, 'PNG', 0, 0, 200, 100)
+      
+      // Save the PDF
+      pdf.save(`qr-ticket-${ticketData.ticketNumber}.pdf`)
+    } catch (err) {
+      console.error('Error generating PDF:', err)
+      setError('Failed to generate PDF. Please try again.')
+    }
   }
 
   const copyToClipboard = async () => {
@@ -156,8 +251,8 @@ export default function QRGeneratorPage() {
                 <QrCode className="h-7 w-7 text-purple-600" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">QR Code Generator</h1>
-                <p className="text-gray-600">Generate unique QR codes in PNG format</p>
+                <h1 className="text-2xl font-bold text-gray-900">QR Ticket Generator</h1>
+                <p className="text-gray-600">Generate professional tickets with embedded QR codes in PDF format</p>
               </div>
             </div>
             <button
@@ -350,46 +445,50 @@ export default function QRGeneratorPage() {
 
           {/* Output Section */}
           <div className="space-y-6">
+            {/* Professional Ticket with Embedded QR Code */}
             <div className="bg-white rounded-lg shadow-sm border p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">Generated QR Code</h2>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {qrCodeDataUrl ? '🎟️ Professional Ticket with QR Code' : 'Generated QR Ticket'}
+                </h2>
                 {qrCodeDataUrl && (
-                  <button
-                    onClick={downloadQRCode}
-                    className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download PNG
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={downloadQRCode}
+                      className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download PDF
+                    </button>
+                  </div>
                 )}
               </div>
               
-              <div className="flex items-center justify-center min-h-[320px] bg-gray-50 rounded-lg">
-                {loading ? (
+              {loading ? (
+                <div className="flex items-center justify-center min-h-[320px]">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-                    <p className="mt-2 text-gray-600">Generating QR code...</p>
+                    <p className="mt-2 text-gray-600">Generating QR ticket...</p>
                   </div>
-                ) : qrCodeDataUrl ? (
-                  <div className="text-center">
-                    <img 
-                      src={qrCodeDataUrl} 
-                      alt="Generated QR Code" 
-                      className="max-w-full max-h-80 rounded-lg shadow-md"
-                      style={{ imageRendering: 'pixelated' }}
-                    />
-                    <p className="mt-2 text-sm text-gray-600">
-                      {settings.size}×{settings.size}px PNG format
-                    </p>
-                  </div>
-                ) : (
+                </div>
+              ) : ticketData && qrCodeDataUrl ? (
+                <div id="qr-ticket-preview" className="max-w-2xl mx-auto">
+                  <TicketTemplate data={ticketData} size="full" />
+                  <p className="text-sm text-gray-600 mt-4 text-center">
+                    QR code is embedded within the ticket for verification
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center min-h-[320px] bg-gray-50 rounded-lg">
                   <div className="text-center">
                     <QrCode className="h-16 w-16 text-gray-300 mx-auto" />
-                    <p className="mt-2 text-gray-500">QR code will appear here</p>
+                    <p className="mt-2 text-gray-500">Your QR ticket will appear here</p>
+                    <p className="mt-1 text-sm text-gray-400">Enter text and click "Generate QR Code"</p>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
+
 
             {/* QR Code Info */}
             {qrCodeDataUrl && (
@@ -398,7 +497,7 @@ export default function QRGeneratorPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Format:</span>
-                    <span className="font-medium">PNG</span>
+                    <span className="font-medium">Professional Ticket PDF</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Size:</span>
@@ -418,16 +517,69 @@ export default function QRGeneratorPage() {
 
             {/* Instructions */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-blue-900 mb-4">How to Use</h3>
+              <h3 className="text-lg font-semibold text-blue-900 mb-4">How It Works</h3>
               <div className="space-y-2 text-sm text-blue-800">
-                <p>• Enter any text, URL, or data in the input field</p>
-                <p>• Click "Generate QR Code" or press Enter</p>
-                <p>• Use "Generate Unique QR Code" for random codes</p>
-                <p>• Customize colors, size, and quality in settings</p>
-                <p>• Download as high-quality PNG format</p>
-                <p>• QR codes work with any standard scanner app</p>
+                <p>✅ Enter any text, URL, or data in the input field</p>
+                <p>✅ Click "Generate QR Code" to create a professional ticket</p>
+                <p>✅ QR code is automatically embedded in the ticket design</p>
+                <p>✅ Use "Generate Unique QR Code" for random ticket codes</p>
+                <p>✅ Customize QR appearance in settings panel</p>
+                <p>✅ Download as professional ticket PDF with embedded QR</p>
+                <p>✅ QR codes work with any standard scanner app</p>
               </div>
             </div>
+
+            {/* QR Code History */}
+            {mounted && (
+              <div className="bg-white rounded-lg shadow-sm border p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Recent QR Codes</h3>
+                  <button
+                    onClick={fetchQRHistory}
+                    disabled={loadingHistory}
+                    className="flex items-center gap-2 px-3 py-1 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loadingHistory ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+                
+                {loadingHistory ? (
+                  <div className="text-center py-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600 mx-auto"></div>
+                    <p className="mt-2 text-sm text-gray-600">Loading QR history...</p>
+                  </div>
+                ) : existingQRCodes.length > 0 ? (
+                  <div className="space-y-3 max-h-60 overflow-y-auto">
+                    {existingQRCodes.slice(0, 5).map((qr, index) => (
+                      <div
+                        key={qr.id || index}
+                        className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
+                        onClick={() => setInputText(qr.qr_data)}
+                      >
+                        <div className="w-8 h-8 bg-purple-100 rounded flex items-center justify-center flex-shrink-0">
+                          <QrCode className="h-4 w-4 text-purple-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {qr.qr_data}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {qr.created_at ? new Date(qr.created_at).toLocaleDateString() : 'Unknown date'}
+                          </p>
+                        </div>
+                        <Copy className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <QrCode className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">No QR codes generated yet</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

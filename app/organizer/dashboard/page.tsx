@@ -1,8 +1,7 @@
-import UserFlowGuard from '@/components/auth/user-flow-guard'
 
 export default function OrganizerDashboardPage() {
   return (
-    <UserFlowGuard requiredRole="organizer">
+    <>
       <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
@@ -16,6 +15,6 @@ export default function OrganizerDashboardPage() {
         </div>
       </div>
       </div>
-    </UserFlowGuard>
+    </>
   )
 }

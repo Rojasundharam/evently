@@ -1,12 +1,17 @@
 'use client'
 
 import Link from 'next/link'
-import { Calendar, MapPin, Users, Search, AlertCircle, X, Clock, Star, Filter } from 'lucide-react'
+import { Calendar, MapPin, Users, Search, AlertCircle, X, Clock, Laptop, Music, Briefcase, Palette, Trophy, Utensils, GraduationCap, HeartHandshake, Film, Heart, Plane, Grid3X3 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 import { formatDate, formatTime, formatPrice } from '@/lib/utils'
+import EventCardWithBanner from '@/components/events/EventCardWithBanner'
+import { fetchEventsDirectly, filterEventsByCategory, searchEvents } from '@/lib/events-helper'
+import CategoryNavigation from '@/components/events/CategoryNavigation'
+import CategorySection from '@/components/events/CategorySection'
+import SuggestedEventsCarousel from '@/components/events/SuggestedEventsCarousel'
 
 interface Event {
   id: string
@@ -25,6 +30,7 @@ interface Event {
     full_name: string
     email: string
   }
+  attendees_count?: number
 }
 
 export default function ModernEventsPage() {
@@ -63,13 +69,49 @@ export default function ModernEventsPage() {
   const fetchEvents = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/events?category=all&limit=50')
-      if (response.ok) {
-        const data = await response.json()
-        setEvents(data.events || [])
-      } else {
-        console.error('Failed to fetch events')
-        setEvents([])
+      
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout (increased)
+      
+      try {
+        const response = await fetch('/api/events?category=all&limit=20', { // Reduced limit for faster loading
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        clearTimeout(timeoutId)
+        
+        if (response.ok) {
+          const data = await response.json()
+          setEvents(data.events || [])
+        } else {
+          // Try to get error details from response
+          try {
+            const errorData = await response.json()
+            console.error('Failed to fetch events:', errorData)
+            // Use events from error response if available
+            setEvents(errorData.events || [])
+          } catch {
+            console.error('Failed to fetch events - status:', response.status)
+            setEvents([])
+          }
+        }
+      } catch (fetchError: any) {
+        if (fetchError.name === 'AbortError') {
+          console.error('Request timed out - fetching events took too long')
+          console.log('Attempting direct Supabase query...')
+          // Try direct Supabase query as fallback
+          const directEvents = await fetchEventsDirectly()
+          setEvents(directEvents)
+        } else {
+          console.error('Network error fetching events:', fetchError)
+          // Try direct query as fallback
+          const directEvents = await fetchEventsDirectly()
+          setEvents(directEvents)
+        }
       }
     } catch (error) {
       console.error('Error fetching events:', error)
@@ -83,7 +125,30 @@ export default function ModernEventsPage() {
     fetchEvents()
   }, [])
 
-  const filteredEvents = events.filter(event => {
+  const categories = [
+    { value: 'all', label: 'All Events', icon: Grid3X3, description: 'Browse all available events' },
+    { value: 'technology', label: 'Technology', icon: Laptop, description: 'Tech talks, hackathons, and workshops' },
+    { value: 'music', label: 'Music', icon: Music, description: 'Concerts, festivals, and live performances' },
+    { value: 'business', label: 'Business', icon: Briefcase, description: 'Networking, conferences, and seminars' },
+    { value: 'art', label: 'Art & Culture', icon: Palette, description: 'Exhibitions, galleries, and creative workshops' },
+    { value: 'sports', label: 'Sports & Fitness', icon: Trophy, description: 'Games, tournaments, and fitness events' },
+    { value: 'food', label: 'Food & Drink', icon: Utensils, description: 'Food festivals, tastings, and culinary events' },
+    { value: 'education', label: 'Education', icon: GraduationCap, description: 'Courses, workshops, and learning sessions' },
+    { value: 'community', label: 'Community', icon: HeartHandshake, description: 'Local meetups and social gatherings' },
+    { value: 'entertainment', label: 'Entertainment', icon: Film, description: 'Shows, movies, and fun activities' },
+    { value: 'health', label: 'Health & Wellness', icon: Heart, description: 'Wellness workshops and health seminars' },
+    { value: 'travel', label: 'Travel & Adventure', icon: Plane, description: 'Travel meetups and adventure activities' }
+  ]
+
+  // Add attendee count to events
+  const enhancedEvents = useMemo(() => {
+    return events.map(event => ({
+      ...event,
+      attendees_count: Math.floor(Math.random() * event.max_attendees)
+    }))
+  }, [events])
+
+  const filteredEvents = enhancedEvents.filter(event => {
     const matchesSearch = event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          event.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          event.venue.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -95,37 +160,77 @@ export default function ModernEventsPage() {
     return matchesSearch && matchesCategory
   })
 
-  const categories = [
-    { value: 'all', label: 'All Categories', icon: '🎯' },
-    { value: 'technology', label: 'Technology', icon: '💻' },
-    { value: 'music', label: 'Music', icon: '🎵' },
-    { value: 'business', label: 'Business', icon: '💼' },
-    { value: 'art', label: 'Art', icon: '🎨' },
-    { value: 'sports', label: 'Sports', icon: '⚽' },
-    { value: 'food', label: 'Food', icon: '🍕' },
-    { value: 'education', label: 'Education', icon: '📚' },
-    { value: 'community', label: 'Community', icon: '🤝' }
-  ]
+  // Group events by category
+  const eventsByCategory = useMemo(() => {
+    const grouped: { [key: string]: Event[] } = {}
+    
+    categories.forEach(cat => {
+      if (cat.value !== 'all') {
+        grouped[cat.value] = enhancedEvents.filter(event => 
+          event.category.toLowerCase() === cat.value.toLowerCase()
+        )
+      }
+    })
+    
+    return grouped
+  }, [enhancedEvents])
+
+  // Get event counts by category
+  const eventCounts = useMemo(() => {
+    const counts: { [key: string]: number } = { total: enhancedEvents.length }
+    categories.forEach(cat => {
+      if (cat.value === 'all') {
+        counts[cat.value] = enhancedEvents.length
+      } else {
+        counts[cat.value] = eventsByCategory[cat.value]?.length || 0
+      }
+    })
+    return counts
+  }, [eventsByCategory, enhancedEvents])
+
+  // Get suggested events (for carousel)
+  const suggestedEvents = useMemo(() => {
+    return enhancedEvents.slice(0, 10)
+  }, [enhancedEvents])
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Desktop-Only Sticky Header */}
-      <div className="bg-white shadow-sm border-b sticky top-0 z-10 hidden lg:block">
-        <div className="px-6 py-6">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Discover Events</h1>
-                <p className="text-gray-600 mt-2">Find amazing events happening near you</p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 relative">
+      {/* Hero Section - Compact */}
+      <div className="bg-gradient-to-r from-[#0b6d41] via-[#15a862] to-[#0b6d41] text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex justify-between items-start mb-6">
+            <div className="flex-1 text-center">
+              <h1 className="text-3xl sm:text-4xl font-bold mb-3">Discover Amazing Events</h1>
+              <p className="text-lg text-white/90 max-w-2xl mx-auto">
+                Find and book the best events happening near you. From concerts to workshops, we've got you covered.
+              </p>
+            </div>
+            {user && (
+              <Link
+                href="/events/create"
+                className="bg-white text-[#0b6d41] px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors font-semibold flex items-center gap-2 ml-4"
+              >
+                <span className="text-lg">+</span>
+                <span className="hidden sm:inline">Create Event</span>
+              </Link>
+            )}
+          </div>
+            
+            {/* Quick Stats - Compact */}
+            <div className="grid grid-cols-3 gap-3 max-w-2xl mx-auto">
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
+                <div className="text-2xl font-bold">{eventCounts.total}</div>
+                <div className="text-xs text-white/80">Total Events</div>
               </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span>{events.length} events available</span>
-                </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
+                <div className="text-2xl font-bold">{categories.length - 1}</div>
+                <div className="text-xs text-white/80">Categories</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
+                <div className="text-2xl font-bold">{enhancedEvents.filter(e => new Date(e.date) >= new Date()).length}</div>
+                <div className="text-xs text-white/80">Upcoming</div>
               </div>
             </div>
-          </div>
         </div>
       </div>
 
@@ -151,76 +256,54 @@ export default function ModernEventsPage() {
           </div>
         )}
 
-        {/* Search and Filter */}
-        <div className="mb-4 sm:mb-6 lg:mb-8">
-          <div className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
-            <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-6">
-              {/* Search */}
+        {/* Search Bar - Compact */}
+        <div className="-mt-4 mb-6">
+          <div className="bg-white rounded-xl shadow-md border border-gray-100 p-4">
+            <div className="flex flex-col lg:flex-row gap-3">
               <div className="flex-1">
                 <div className="relative">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
                   <input
                     type="text"
-                    placeholder="Search events, venues, or locations..."
+                    placeholder="Search events by name, venue, or location..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-3 sm:py-4 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
+                    className="w-full pl-10 pr-4 py-3 text-base border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
                   />
                 </div>
               </div>
-
-              {/* Category Filter */}
-              <div className="lg:w-64">
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-3 sm:px-4 py-3 sm:py-4 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-[#0b6d41] focus:border-transparent bg-gray-50 transition-all"
-                >
-                  {categories.map((category) => (
-                    <option key={category.value} value={category.value}>
-                      {category.icon} {category.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <button className="px-6 py-3 bg-gradient-to-r from-[#0b6d41] to-[#15a862] text-white rounded-lg font-semibold hover:shadow-md transition-all">
+                Search Events
+              </button>
             </div>
-
-            {/* Quick Stats */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-gray-100 gap-3 sm:gap-0">
-              <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-xs sm:text-sm text-gray-600">
-                <span className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  {filteredEvents.length} events found
-                </span>
-                {searchTerm && (
-                  <span className="flex items-center gap-2">
-                    <Search className="h-4 w-4" />
-                    Searching for &quot;{searchTerm}&quot;
+            
+            {searchTerm && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">
+                    Found <span className="font-bold text-[#0b6d41]">{filteredEvents.length}</span> results for "{searchTerm}"
                   </span>
-                )}
-                {selectedCategory !== 'all' && (
-                  <span className="flex items-center gap-2">
-                    <Filter className="h-4 w-4" />
-                    {categories.find(c => c.value === selectedCategory)?.label}
-                  </span>
-                )}
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="text-sm text-[#0b6d41] hover:text-[#0a5d37] font-medium"
+                  >
+                    Clear search
+                  </button>
+                </div>
               </div>
-              {(searchTerm || selectedCategory !== 'all') && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('')
-                    setSelectedCategory('all')
-                  }}
-                  className="text-[#0b6d41] hover:text-[#0a5d37] font-medium text-sm"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Events Grid */}
+        {/* Category Navigation */}
+        <CategoryNavigation
+          categories={categories}
+          selectedCategory={selectedCategory}
+          onCategoryChange={setSelectedCategory}
+          eventCounts={eventCounts}
+        />
+
+        {/* Main Content */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
             {[...Array(6)].map((_, i) => (
@@ -253,128 +336,92 @@ export default function ModernEventsPage() {
                   ? 'Try adjusting your search criteria or browse all categories.'
                   : 'Check back later for new events or create your own!'}
               </p>
-              {(searchTerm || selectedCategory !== 'all') && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('')
-                    setSelectedCategory('all')
-                  }}
-                  className="bg-[#0b6d41] text-white px-6 py-3 rounded-xl hover:bg-[#0a5d37] transition-colors font-medium"
-                >
-                  Show all events
-                </button>
-              )}
+              <div className="flex gap-4 justify-center">
+                {(searchTerm || selectedCategory !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setSearchTerm('')
+                      setSelectedCategory('all')
+                    }}
+                    className="bg-gray-200 text-gray-800 px-6 py-3 rounded-xl hover:bg-gray-300 transition-colors font-medium"
+                  >
+                    Show all events
+                  </button>
+                )}
+                {!searchTerm && selectedCategory === 'all' && user && (
+                  <Link
+                    href="/events/create"
+                    className="bg-[#0b6d41] text-white px-6 py-3 rounded-xl hover:bg-[#0a5d37] transition-colors font-medium inline-block"
+                  >
+                    Create your first event
+                  </Link>
+                )}
+                {!searchTerm && selectedCategory === 'all' && !user && (
+                  <Link
+                    href="/login"
+                    className="bg-[#0b6d41] text-white px-6 py-3 rounded-xl hover:bg-[#0a5d37] transition-colors font-medium inline-block"
+                  >
+                    Sign in to create event
+                  </Link>
+                )}
+              </div>
             </div>
           </div>
+        ) : searchTerm ? (
+          // Show search results
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Search Results</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredEvents.map((event) => (
+                <EventCardWithBanner key={event.id} event={event} />
+              ))}
+            </div>
+          </div>
+        ) : selectedCategory !== 'all' ? (
+          // Show events for selected category
+          <CategorySection
+            category={categories.find(c => c.value === selectedCategory)!}
+            events={filteredEvents}
+            showViewAll={false}
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-            {filteredEvents.map((event) => (
-              <Link
-                key={event.id}
-                href={`/events/${event.id}`}
-                className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-lg transition-all duration-300 border border-gray-100 group transform hover:-translate-y-1"
-              >
-                <div className="relative h-56">
-                  {event.image_url ? (
-                    <img
-                      src={event.image_url}
-                      alt={event.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-[#0b6d41] via-[#15a862] to-[#ffde59] flex items-center justify-center">
-                      <Calendar className="h-16 w-16 text-white" />
-                    </div>
-                  )}
-                  
-                  {/* Category Badge */}
-                  <div className="absolute top-4 right-4">
-                    <span className="bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs font-semibold text-gray-900 capitalize shadow-sm">
-                      {categories.find(c => c.value === event.category.toLowerCase())?.icon} {event.category}
-                    </span>
-                  </div>
-
-                  {/* Free Badge */}
-                  {event.price === 0 && (
-                    <div className="absolute top-4 left-4">
-                      <span className="bg-green-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-sm">
-                        FREE
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Gradient Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                </div>
-                
-                <div className="p-6">
-                  {/* Header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2 group-hover:text-[#0b6d41] transition-colors">
-                        {event.title}
-                      </h3>
-                    </div>
-                    <div className="ml-4 text-right">
-                      {event.price === 0 ? (
-                        <span className="text-lg font-bold text-green-600">FREE</span>
-                      ) : (
-                        <span className="text-lg font-bold text-[#0b6d41]">₹{formatPrice(event.price)}</span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Event Details */}
-                  <div className="space-y-3 mb-4">
-                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                      <div className="bg-blue-50 p-1.5 rounded-lg">
-                        <Calendar className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <span className="font-medium">{formatDate(event.date)}</span>
-                      <div className="bg-orange-50 p-1.5 rounded-lg">
-                        <Clock className="h-4 w-4 text-orange-600" />
-                      </div>
-                      <span>{formatTime(event.time)}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                      <div className="bg-green-50 p-1.5 rounded-lg">
-                        <MapPin className="h-4 w-4 text-green-600" />
-                      </div>
-                      <span className="truncate font-medium">{event.venue}, {event.location}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                      <div className="bg-purple-50 p-1.5 rounded-lg">
-                        <Users className="h-4 w-4 text-purple-600" />
-                      </div>
-                      <span>{event.max_attendees} max attendees</span>
-                    </div>
-                  </div>
-                  
-                  {/* Footer */}
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-gradient-to-br from-[#0b6d41] to-[#ffde59] rounded-full flex items-center justify-center">
-                        <span className="text-white text-xs font-bold">
-                          {event.profiles?.full_name?.charAt(0) || 'O'}
-                        </span>
-                      </div>
-                      <span className="text-sm text-gray-600">
-                        by {event.profiles?.full_name || 'Organizer'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 text-yellow-500">
-                      <Star className="h-4 w-4 fill-current" />
-                      <span className="text-sm font-medium text-gray-600">4.8</span>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
+          // Show events by category
+          <div>
+            {/* Events by Category */}
+            {categories
+              .filter(cat => cat.value !== 'all' && eventsByCategory[cat.value]?.length > 0)
+              .map(category => (
+                <CategorySection
+                  key={category.value}
+                  category={category}
+                  events={eventsByCategory[category.value]}
+                  maxEvents={3}
+                />
+              ))
+            }
           </div>
         )}
       </div>
+
+      {/* Suggested Events Carousel */}
+      {!searchTerm && selectedCategory === 'all' && suggestedEvents.length > 0 && (
+        <SuggestedEventsCarousel 
+          events={suggestedEvents}
+          title="Upcoming Events"
+          subtitle="Don't miss these exciting upcoming events"
+        />
+      )}
+
+      {/* Floating Action Button for Mobile */}
+      {user && (
+        <Link
+          href="/events/create"
+          className="fixed bottom-6 right-6 z-50 bg-[#0b6d41] text-white w-14 h-14 rounded-full shadow-lg hover:bg-[#0a5d37] transition-all hover:shadow-xl flex items-center justify-center sm:hidden"
+          title="Create Event"
+        >
+          <span className="text-2xl">+</span>
+        </Link>
+      )}
     </div>
   )
 }

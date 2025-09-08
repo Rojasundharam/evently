@@ -3,7 +3,6 @@ import { Calendar, MapPin, Ticket, QrCode, Clock, User, CheckCircle, AlertCircle
 import { formatDate, formatTime, formatPrice } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import UserFlowGuard from '@/components/auth/user-flow-guard'
 import { lazy, Suspense } from 'react'
 
 // Lazy load the heavy TicketTemplate component
@@ -18,37 +17,61 @@ async function getUserBookings() {
     redirect('/events')
   }
 
-  // Get bookings with tickets
-  const { data: bookings, error } = await supabase
-    .from('bookings')
-    .select(`
-      *,
-      events (
-        id,
-        title,
-        date,
-        time,
-        venue,
-        location,
-        image_url,
-        price
-      ),
-      tickets (
-        id,
-        status,
-        qr_code,
-        checked_in_at
-      )
-    `)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
+  try {
+    // Get bookings with tickets - simplified query first
+    const { data: bookings, error } = await supabase
+      .from('bookings')
+      .select(`
+        *,
+        events!inner (
+          id,
+          title,
+          date,
+          time,
+          venue,
+          location,
+          image_url,
+          price
+        ),
+        tickets (
+          id,
+          status,
+          qr_code,
+          checked_in_at
+        )
+      `)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    console.error('Error fetching bookings:', error)
+    if (error) {
+      console.error('Supabase error fetching bookings:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
+      
+      // Try a simpler query without joins if the complex one fails
+      const { data: simpleBookings, error: simpleError } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      
+      if (simpleError) {
+        console.error('Simple query also failed:', simpleError)
+        return []
+      }
+      
+      // Return simple bookings without event details
+      return simpleBookings || []
+    }
+
+    return bookings || []
+  } catch (err) {
+    console.error('Unexpected error in getUserBookings:', err)
     return []
   }
-
-  return bookings || []
 }
 
 export default async function ModernBookingsPage() {
@@ -63,7 +86,7 @@ export default async function ModernBookingsPage() {
   ).length
 
   return (
-    <UserFlowGuard requiredRole="user">
+    <>
       <div className="min-h-screen bg-gray-50">
         {/* Header */}
         <div className="bg-white shadow-sm border-b">
@@ -373,6 +396,6 @@ export default async function ModernBookingsPage() {
           )}
         </div>
       </div>
-    </UserFlowGuard>
+    </>
   )
 }

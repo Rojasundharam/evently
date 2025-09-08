@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Ticket, Calendar, Clock, MapPin, Download, QrCode, ChevronRight } from 'lucide-react'
+import { Ticket, Calendar, Clock, MapPin, Download, QrCode, ChevronRight, Filter, Shuffle, Search, X, DownloadCloud } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -35,6 +35,15 @@ export default function TicketsPage() {
   const [selectedTicket, setSelectedTicket] = useState<TicketData | null>(null)
   const [userRole, setUserRole] = useState<string>('user')
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [searchTerm, setSearchTerm] = useState<string>('')
+  const [filterDate, setFilterDate] = useState<string>('')
+  const [filterVenue, setFilterVenue] = useState<string>('')
+  const [isShuffled, setIsShuffled] = useState<boolean>(false)
+  const [showFilters, setShowFilters] = useState<boolean>(false)
+  const [downloadingAll, setDownloadingAll] = useState<boolean>(false)
+  const [downloadMode, setDownloadMode] = useState<'single' | 'batch'>('single')
+  const [sortBy, setSortBy] = useState<'date' | 'name' | 'venue' | 'status'>('date')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const supabase = createClient()
 
   useEffect(() => {
@@ -141,13 +150,37 @@ export default function TicketsPage() {
     }
   }
 
-  const downloadTicket = (ticket: TicketData) => {
-    if (!ticket.qr_code_image) return
-    
-    const link = document.createElement('a')
-    link.download = `ticket-${ticket.ticket_number}.png`
-    link.href = ticket.qr_code_image
-    link.click()
+  const downloadTicket = async (ticket: TicketData) => {
+    try {
+      // Use the enhanced ticket download API that includes the full ticket template
+      const response = await fetch('/api/tickets/download-with-template', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ticketId: ticket.id,
+          format: 'pdf'
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to download ticket')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `ticket-${ticket.ticket_number}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Error downloading ticket:', error)
+      alert('Failed to download ticket. Please try again.')
+    }
   }
 
   const formatDate = (dateString: string) => {
@@ -159,9 +192,148 @@ export default function TicketsPage() {
     })
   }
 
-  const filteredTickets = filterStatus === 'all' 
-    ? tickets 
-    : tickets.filter(t => t.status === filterStatus)
+  const shuffleArray = <T,>(array: T[]): T[] => {
+    const arr = [...array]
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]]
+    }
+    return arr
+  }
+
+  const applyFilters = () => {
+    let filtered = tickets
+
+    // Status filter
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(t => t.status === filterStatus)
+    }
+
+    // Search filter
+    if (searchTerm) {
+      filtered = filtered.filter(t => 
+        t.event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.ticket_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.event.venue.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+
+    // Date filter
+    if (filterDate) {
+      filtered = filtered.filter(t => t.event.date === filterDate)
+    }
+
+    // Venue filter
+    if (filterVenue) {
+      filtered = filtered.filter(t => 
+        t.event.venue.toLowerCase().includes(filterVenue.toLowerCase())
+      )
+    }
+
+    return filtered
+  }
+
+  const sortTickets = (tickets: TicketData[]) => {
+    const sorted = [...tickets].sort((a, b) => {
+      let compareValue = 0
+      
+      switch (sortBy) {
+        case 'date':
+          compareValue = new Date(a.event.date).getTime() - new Date(b.event.date).getTime()
+          break
+        case 'name':
+          compareValue = a.event.title.localeCompare(b.event.title)
+          break
+        case 'venue':
+          compareValue = a.event.venue.localeCompare(b.event.venue)
+          break
+        case 'status':
+          compareValue = a.status.localeCompare(b.status)
+          break
+      }
+      
+      return sortOrder === 'asc' ? compareValue : -compareValue
+    })
+    
+    return sorted
+  }
+
+  const filteredTickets = applyFilters()
+  const sortedTickets = sortTickets(filteredTickets)
+  const displayTickets = isShuffled ? shuffleArray(sortedTickets) : sortedTickets
+
+  const downloadAllTickets = async () => {
+    setDownloadingAll(true)
+    try {
+      const ticketsToDownload = filteredTickets.length > 0 ? filteredTickets : tickets
+      
+      if (downloadMode === 'single') {
+        // Use bulk download API for single PDF
+        const response = await fetch('/api/tickets/download-bulk', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            tickets: ticketsToDownload
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to download tickets')
+        }
+
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `all-tickets-${Date.now()}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(link)
+        
+        alert(`Successfully downloaded ${ticketsToDownload.length} tickets in a single PDF!`)
+      } else {
+        // Download individual tickets in batch
+        let successCount = 0
+        for (let i = 0; i < ticketsToDownload.length; i++) {
+          try {
+            const ticket = ticketsToDownload[i]
+            await downloadTicket(ticket)
+            successCount++
+            // Add small delay between downloads
+            await new Promise(resolve => setTimeout(resolve, 300))
+          } catch (error) {
+            console.error(`Failed to download ticket ${i + 1}:`, error)
+          }
+        }
+        alert(`Downloaded ${successCount} of ${ticketsToDownload.length} tickets individually!`)
+      }
+    } catch (error) {
+      console.error('Error downloading all tickets:', error)
+      alert('Failed to download tickets. Please try again.')
+    } finally {
+      setDownloadingAll(false)
+    }
+  }
+
+  const clearFilters = () => {
+    setFilterStatus('all')
+    setSearchTerm('')
+    setFilterDate('')
+    setFilterVenue('')
+  }
+
+  const getUniqueVenues = () => {
+    const venues = [...new Set(tickets.map(t => t.event.venue))]
+    return venues.sort()
+  }
+
+  const getUniqueDates = () => {
+    const dates = [...new Set(tickets.map(t => t.event.date))]
+    return dates.sort()
+  }
 
   const getRoleBadge = () => {
     const badges = {
@@ -209,40 +381,189 @@ export default function TicketsPage() {
           </p>
         </div>
 
-        {/* Filter buttons */}
+        {/* Enhanced Filter and Actions Section */}
         {tickets.length > 0 && (
-          <div className="mb-6 flex flex-wrap gap-2">
-            <button
-              onClick={() => setFilterStatus('all')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filterStatus === 'all' 
-                  ? 'bg-[#ffde59] text-[#0b6d41]' 
-                  : 'bg-white text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              All ({tickets.length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('valid')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filterStatus === 'valid' 
-                  ? 'bg-green-500 text-white' 
-                  : 'bg-white text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              Valid ({tickets.filter(t => t.status === 'valid').length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('used')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filterStatus === 'used' 
-                  ? 'bg-gray-500 text-white' 
-                  : 'bg-white text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              Used ({tickets.filter(t => t.status === 'used').length})
-            </button>
-          </div>
+          <>
+            {/* Search and Actions Bar */}
+            <div className="mb-6 bg-white rounded-xl shadow-md p-4">
+              <div className="flex flex-col lg:flex-row gap-4">
+                {/* Search Bar */}
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by event name, ticket number, or venue..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffde59] focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setShowFilters(!showFilters)}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all"
+                  >
+                    <Filter className="h-4 w-4" />
+                    Filters
+                    {(filterStatus !== 'all' || filterDate || filterVenue) && (
+                      <span className="bg-[#ffde59] text-[#0b6d41] px-2 py-0.5 rounded-full text-xs font-semibold">
+                        Active
+                      </span>
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={() => setIsShuffled(!isShuffled)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                      isShuffled 
+                        ? 'bg-[#ffde59] text-[#0b6d41]' 
+                        : 'bg-white border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Shuffle className="h-4 w-4" />
+                    {isShuffled ? 'Shuffled' : 'Shuffle'}
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={downloadMode}
+                      onChange={(e) => setDownloadMode(e.target.value as 'single' | 'batch')}
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffde59]"
+                      disabled={downloadingAll}
+                    >
+                      <option value="single">Single PDF</option>
+                      <option value="batch">Individual Files</option>
+                    </select>
+                    
+                    <button
+                      onClick={downloadAllTickets}
+                      disabled={downloadingAll || filteredTickets.length === 0}
+                      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#ffde59] to-[#f5c842] text-[#0b6d41] rounded-lg font-semibold hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <DownloadCloud className="h-4 w-4" />
+                      {downloadingAll ? `Downloading...` : `Download All (${filteredTickets.length})`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Advanced Filters Panel */}
+              {showFilters && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Status Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <select
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffde59]"
+                      >
+                        <option value="all">All Status</option>
+                        <option value="valid">Valid</option>
+                        <option value="used">Used</option>
+                      </select>
+                    </div>
+
+                    {/* Date Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Event Date</label>
+                      <select
+                        value={filterDate}
+                        onChange={(e) => setFilterDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffde59]"
+                      >
+                        <option value="">All Dates</option>
+                        {getUniqueDates().map(date => (
+                          <option key={date} value={date}>
+                            {new Date(date).toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric', 
+                              year: 'numeric' 
+                            })}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Venue Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Venue</label>
+                      <select
+                        value={filterVenue}
+                        onChange={(e) => setFilterVenue(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffde59]"
+                      >
+                        <option value="">All Venues</option>
+                        {getUniqueVenues().map(venue => (
+                          <option key={venue} value={venue}>{venue}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Clear Filters */}
+                    <div className="flex items-end">
+                      <button
+                        onClick={clearFilters}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
+                      >
+                        <X className="h-4 w-4" />
+                        Clear Filters
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sorting Options */}
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <span className="text-sm font-medium text-gray-700">Sort by:</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as 'date' | 'name' | 'venue' | 'status')}
+                        className="px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ffde59] text-sm"
+                      >
+                        <option value="date">Event Date</option>
+                        <option value="name">Event Name</option>
+                        <option value="venue">Venue</option>
+                        <option value="status">Status</option>
+                      </select>
+                      <button
+                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                        className="flex items-center gap-1 px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all text-sm"
+                      >
+                        {sortOrder === 'asc' ? '↑' : '↓'}
+                        {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Stats */}
+            <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <p className="text-sm text-gray-600">Total Tickets</p>
+                <p className="text-2xl font-bold text-gray-900">{tickets.length}</p>
+              </div>
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <p className="text-sm text-gray-600">Valid Tickets</p>
+                <p className="text-2xl font-bold text-green-600">{tickets.filter(t => t.status === 'valid').length}</p>
+              </div>
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <p className="text-sm text-gray-600">Used Tickets</p>
+                <p className="text-2xl font-bold text-gray-600">{tickets.filter(t => t.status === 'used').length}</p>
+              </div>
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <p className="text-sm text-gray-600">Filtered Results</p>
+                <p className="text-2xl font-bold text-[#ffde59]">{filteredTickets.length}</p>
+              </div>
+            </div>
+          </>
         )}
 
         {tickets.length === 0 ? (
@@ -258,9 +579,22 @@ export default function TicketsPage() {
               <ChevronRight className="h-5 w-5" />
             </Link>
           </div>
+        ) : filteredTickets.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+            <Filter className="h-24 w-24 text-gray-300 mx-auto mb-4" />
+            <h2 className="text-2xl font-semibold text-gray-900 mb-2">No tickets match your filters</h2>
+            <p className="text-gray-600 mb-6">Try adjusting your search criteria or clearing filters</p>
+            <button
+              onClick={clearFilters}
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-[#ffde59] to-[#f5c842] text-[#0b6d41] px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition-all"
+            >
+              <X className="h-5 w-5" />
+              Clear All Filters
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredTickets.map((ticket) => (
+            {displayTickets.map((ticket) => (
               <div
                 key={ticket.id}
                 className="bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-2xl transition-all cursor-pointer"

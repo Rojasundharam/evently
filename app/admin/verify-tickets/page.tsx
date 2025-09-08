@@ -2,7 +2,13 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { QrCode, Search, CheckCircle, XCircle, AlertCircle, Clock, User, Ticket } from 'lucide-react'
+import { QrCode, Search, CheckCircle, XCircle, AlertCircle, Clock, User, Ticket, Camera } from 'lucide-react'
+import dynamic from 'next/dynamic'
+
+// Dynamically import QR scanner to avoid SSR issues
+const QRScannerModal = dynamic(() => import('@/components/qr-scanner-modal'), {
+  ssr: false
+})
 
 interface VerificationResult {
   success: boolean
@@ -42,6 +48,7 @@ export default function VerifyTicketsPage() {
   const [isVerifying, setIsVerifying] = useState(false)
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [recentCheckins, setRecentCheckins] = useState<any[]>([])
+  const [showQRScanner, setShowQRScanner] = useState(false)
   const supabase = createClient()
 
   const handleVerify = async () => {
@@ -58,7 +65,7 @@ export default function VerifyTicketsPage() {
 
     try {
       // First, try the new QR verification API for QR codes
-      const isLikelyQRData = ticketInput.length > 50 || ticketInput.includes('://') || ticketInput.startsWith('eyJ')
+      const isLikelyQRData = ticketInput.length > 50 || ticketInput.includes('://') || ticketInput.startsWith('eyJ') || ticketInput.startsWith('EVTKT:')
       
       if (isLikelyQRData) {
         console.log('Attempting QR verification via new API...')
@@ -252,12 +259,13 @@ export default function VerifyTicketsPage() {
       if (!ticket) {
         try {
           // Try to decrypt QR code and check if it's a printed ticket
+          const { decryptTicketData: decrypt, decryptTicketDataSync: decryptSync } = await import('@/lib/qr-generator')
           let qrData = null
           
           try {
-            qrData = decryptTicketDataSync(ticketInput.trim())
+            qrData = decryptSync(ticketInput.trim())
           } catch (syncError) {
-            qrData = await decryptTicketData(ticketInput.trim())
+            qrData = await decrypt(ticketInput.trim())
           }
           
           if (qrData && qrData.ticketType === 'printed') {
@@ -456,8 +464,22 @@ export default function VerifyTicketsPage() {
   }
 
   const handleScanQR = () => {
-    // This would open camera for QR scanning
-    alert('QR Camera scanning will be implemented. For now, paste the QR code data in the input field.')
+    setShowQRScanner(true)
+  }
+
+  const handleQRScanSuccess = async (qrData: string) => {
+    console.log('QR Code scanned successfully:', qrData)
+    setTicketInput(qrData)
+    setShowQRScanner(false)
+    // Automatically verify after successful scan
+    setTimeout(async () => {
+      await handleVerifyWithData(qrData)
+    }, 100)
+  }
+
+  const handleVerifyWithData = async (data: string) => {
+    setTicketInput(data)
+    await handleVerify()
   }
 
   const getStatusIcon = () => {
@@ -507,7 +529,7 @@ export default function VerifyTicketsPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Enter Booking ID, Ticket Number, or scan QR code
+                    Enter Booking ID, Ticket Number, or scan QR code from PDF/Image
                   </label>
                   <div className="flex flex-col sm:flex-row gap-3">
                     <input
@@ -543,8 +565,8 @@ export default function VerifyTicketsPage() {
                     onClick={handleScanQR}
                     className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 text-gray-600 rounded-lg hover:border-gray-400 hover:text-gray-800 transition-colors"
                   >
-                    <QrCode className="h-5 w-5" />
-                    Click to scan QR code with camera
+                    <Camera className="h-5 w-5" />
+                    Click to scan QR code (Camera or Upload PDF/Image)
                   </button>
                 </div>
               </div>
@@ -654,6 +676,13 @@ export default function VerifyTicketsPage() {
           </div>
         </div>
       </div>
+
+      {/* QR Scanner Modal */}
+      <QRScannerModal
+        isOpen={showQRScanner}
+        onClose={() => setShowQRScanner(false)}
+        onScan={handleQRScanSuccess}
+      />
     </div>
   )
 }

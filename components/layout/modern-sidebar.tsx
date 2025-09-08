@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { 
   Home, 
@@ -20,14 +20,15 @@ import {
   Mail,
   LogOut,
   CheckCircle,
-  Printer
+
+  Printer,
+  Image as ImageIcon
+
 } from 'lucide-react'
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 
-// Dynamically import sign-in page to avoid circular dependencies
-const SignInPage = dynamic(() => import('@/app/auth/sign-in/page'), { ssr: false })
 
 // Navigation items for different user types
 const userNavigation = [
@@ -39,14 +40,20 @@ const userNavigation = [
 const organizerNavigation = [
   { name: 'My Events', href: '/organizer/my-events', icon: Calendar },
   { name: 'Payments', href: '/payments', icon: CreditCard },
+  { name: 'Verify Tickets', href: '/verify', icon: CheckCircle },
+  { name: 'Ticket Templates', href: '/organizer/ticket-templates', icon: ImageIcon },
+
 ]
 
 const adminNavigation = [
   { name: 'User Management', href: '/admin/users', icon: Users },
   { name: 'Admin Payments', href: '/admin/payments', icon: CreditCard },
+
   { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
-  { name: 'Verify Tickets', href: '/admin/verify-tickets', icon: CheckCircle },
-  { name: 'Generate Printed QR', href: '/admin/generate-printed-qr', icon: Printer },
+  { name: 'Verify Tickets', href: '/verify', icon: CheckCircle },
+  { name: 'Enhanced Ticket Generator', href: '/admin/enhanced-ticket-generator', icon: Ticket },
+  { name: 'Predefined Tickets', href: '/admin/predefined-tickets', icon: ImageIcon },
+
 ]
 
 interface ModernSidebarProps {
@@ -55,6 +62,7 @@ interface ModernSidebarProps {
 
 export default function ModernSidebar({ children }: ModernSidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [mounted, setMounted] = useState(false)
@@ -78,11 +86,11 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
         setIsLoading(true)
         console.log('🔍 Checking user authentication...')
         
-        // Check if we're on the sign-in page
-        const isSignInPage = typeof window !== 'undefined' && window.location.pathname.includes('/auth/sign-in')
+        // Check if we're on the login page
+        const isLoginPage = typeof window !== 'undefined' && window.location.pathname.includes('/login')
         
-        if (isSignInPage) {
-          console.log('📝 On sign-in page, skipping auth check')
+        if (isLoginPage) {
+          console.log('📝 On login page, skipping auth check')
           setUser(null)
           setUserRole('user')
           setIsLoading(false)
@@ -168,11 +176,12 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
       }
     }
 
-    // Add timeout to prevent infinite loading - but only if no auth state changes occur
+    // Add timeout to prevent infinite loading
     loadingTimeout = setTimeout(() => {
-      console.warn('Auth check taking too long, proceeding without auth')
+      console.warn('Auth check timeout - setting default state')
       setIsLoading(false)
-    }, 5000) // 5 seconds timeout
+      // Don't set user to null here, let the auth check complete
+    }, 8000) // 8 seconds timeout for slower connections
 
     checkUser().finally(() => {
       if (loadingTimeout) clearTimeout(loadingTimeout)
@@ -245,65 +254,44 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
           console.log('🔍 Looking for user ID:', currentSession.user.id)
           console.log('🔍 User email:', currentSession.user.email)
           
-          // Try to fetch profile by ID first with timeout
-          console.log('🔄 Starting profile fetch by ID...')
+          // Try to fetch profile by ID
+          console.log('🔄 Fetching profile by ID...')
           let profile = null
-          let profileError = null
           
           try {
-            // Add a timeout to prevent hanging
-            const fetchPromise = supabase
+            const { data, error } = await supabase
               .from('profiles')
               .select('role, email, id')
               .eq('id', currentSession.user.id)
-              .single()
+              .maybeSingle()
             
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
-            )
-            
-            const result = await Promise.race([fetchPromise, timeoutPromise])
-            profile = (result as any).data
-            profileError = (result as any).error
-            console.log('📋 Profile fetch by ID result:', { profile, profileError })
+            profile = data
+            console.log('📋 Profile fetch result:', { profile, error })
           } catch (fetchError) {
-            console.warn('⚠️ Profile fetch by ID timed out or failed:', (fetchError as Error).message)
-            profileError = fetchError
-            // Continue execution - we'll handle this with the admin override below
+            console.warn('⚠️ Profile fetch error:', fetchError)
           }
           
-          // If profile not found by ID, try by email (with timeout)
-          if (!profile || profileError) {
-            console.log('🔄 Profile not found by ID, trying by email:', currentSession.user.email)
+          // If profile not found by ID, try by email
+          if (!profile) {
+            console.log('🔄 Trying to fetch by email:', currentSession.user.email)
             try {
-              const emailFetchPromise = supabase
+              const { data } = await supabase
                 .from('profiles')
                 .select('role, email, id')
                 .eq('email', currentSession.user.email as string)
-                .single()
+                .maybeSingle()
               
-              const emailTimeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Email fetch timeout')), 2000)
-              )
-              
-              const emailResult = await Promise.race([emailFetchPromise, emailTimeoutPromise])
-              const profileByEmail = (emailResult as any).data
-              const emailError = (emailResult as any).error
-              
-              console.log('📧 Profile by email result:', { profileByEmail, emailError })
-              
-              if (profileByEmail && !emailError) {
-                console.log('✅ Found profile by email, using that')
-                profile = profileByEmail
-                profileError = null
+              if (data) {
+                console.log('✅ Found profile by email')
+                profile = data
               }
             } catch (emailFetchError) {
-              console.warn('⚠️ Profile fetch by email timed out or failed:', (emailFetchError as Error).message)
+              console.warn('⚠️ Email fetch error:', emailFetchError)
             }
           }
           
           // If still no profile found, try to create one
-          if (!profile || profileError) {
+          if (!profile) {
             console.log('📝 No profile found, attempting to create...')
             
             // For the specific admin user, create with admin role
@@ -403,6 +391,18 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
     }
   }, [user?.email]) // Remove userRole from dependencies to prevent infinite loop
 
+  // Handle redirect to login when not authenticated
+  React.useEffect(() => {
+    if (!user && mounted && !isLoading) {
+      // Check if we're not already on a login/auth page to prevent infinite loops
+      const isOnAuthPage = pathname === '/login' || pathname.startsWith('/auth/') || pathname === '/auth/sign-in'
+      if (!isOnAuthPage) {
+        console.log('🔐 Redirecting to login page - no authenticated user found')
+        router.push('/login')
+      }
+    }
+  }, [user, mounted, isLoading, router, pathname])
+
   // Use useMemo to recompute navigation when userRole changes
   const navigation = React.useMemo(() => {
     console.log('🧭 Computing navigation for role:', userRole, 'Loading:', isLoading, 'Mounted:', mounted, 'User:', !!user)
@@ -420,9 +420,22 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
       return adminNav
     }
     
-    if (isLoading || !mounted || !user) {
-      console.log('🧭 Returning empty navigation - not ready')
+    // If still loading, show basic navigation
+    if (isLoading && !user) {
+      console.log('🧭 Still loading - showing basic navigation')
+      return userNavigation // Show basic nav while loading
+    }
+    
+    // If not mounted yet, return empty
+    if (!mounted) {
+      console.log('🧭 Not mounted yet')
       return []
+    }
+    
+    // If no user, show public navigation
+    if (!user) {
+      console.log('🧭 No user - showing public navigation')
+      return userNavigation
     }
     
     let nav = [...userNavigation]
@@ -448,34 +461,51 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
     try {
       console.log('🚪 Signing out user...')
       
-      // Reset all state first
-      setUser(null)
-      setUserRole('user')
-      setShowProfileMenu(false)
-      setIsLoading(true)
-      
-      // Sign out from Supabase
-    const { error } = await supabase.auth.signOut()
-    if (error) {
+      // Sign out from Supabase first
+      const { error } = await supabase.auth.signOut()
+      if (error) {
         console.error('❌ Error signing out:', error)
       } else {
         console.log('✅ Successfully signed out')
       }
       
-      // Force reload to clear any cached state
-      window.location.href = '/auth/sign-in'
+      // Clear all storage
+      localStorage.clear()
+      sessionStorage.clear()
+      
+      // Reset all state
+      setUser(null)
+      setUserRole('user')
+      setShowProfileMenu(false)
+      setIsLoading(false)
+      
+      // Redirect to login page
+      router.push('/login')
     } catch (error) {
       console.error('❌ Sign out error:', error)
-      // Force reload anyway
-      window.location.href = '/auth/sign-in'
+      // Force reload as fallback
+      window.location.href = '/login'
     }
   }
 
-  // If user is not authenticated and component is mounted, show sign-in page
-  // Add additional check to prevent showing sign-in during auth state changes
+  // If user is not authenticated and component is mounted, handle appropriately
+  // The actual redirect is handled in the useEffect hook above
   if (!user && mounted && !isLoading) {
-    console.log('🔐 Showing sign-in page - no authenticated user found')
-    return <SignInPage />
+    // If we're on an auth page, render the children (login form)
+    const isOnAuthPage = pathname === '/login' || pathname.startsWith('/auth/') || pathname === '/auth/sign-in'
+    if (isOnAuthPage) {
+      return <>{children}</>
+    }
+    
+    // Otherwise show loading while redirecting
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0b6d41] mx-auto mb-2"></div>
+          <p className="text-gray-600 text-sm">Redirecting to login...</p>
+        </div>
+      </div>
+    )
   }
 
   // Show loading if still processing auth
@@ -606,7 +636,7 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
                 </Link>
               ) : (
                 <Link
-                  href="/auth/sign-in"
+                  href="/login"
                   className="w-full flex items-center justify-center gap-2 p-3 bg-[#0b6d41] text-white rounded-lg hover:bg-[#0a5d37] transition-colors"
                 >
                   <Mail className="h-4 w-4" />
@@ -757,7 +787,7 @@ export default function ModernSidebar({ children }: ModernSidebarProps) {
               </Link>
             ) : (
               <Link
-                href="/auth/sign-in"
+                href="/login"
                 onClick={() => setSidebarOpen(false)}
                 className="w-full flex items-center justify-center gap-2 p-3 bg-[#0b6d41] text-white rounded-lg hover:bg-[#0a5d37] transition-colors"
               >

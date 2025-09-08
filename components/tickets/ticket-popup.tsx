@@ -86,13 +86,37 @@ export default function TicketPopup({ isOpen, onClose, tickets, event, booking }
 
   const currentTicket = tickets[currentTicketIndex]
 
-  const downloadTicket = (ticket: Ticket) => {
-    if (!ticket.qr_code_image) return
-    
-    const link = document.createElement('a')
-    link.download = `ticket-${ticket.ticket_number}.png`
-    link.href = ticket.qr_code_image
-    link.click()
+  const downloadTicket = async (ticket: Ticket) => {
+    try {
+      // Use the new enhanced ticket template download API
+      const response = await fetch('/api/tickets/download-with-template', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ticketId: ticket.id,
+          format: 'pdf'
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to download ticket')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ticket-${ticket.ticket_number}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Error downloading ticket:', error)
+      alert('Failed to download ticket. Please try again.')
+    }
   }
 
   const downloadAllTickets = () => {

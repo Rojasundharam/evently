@@ -13,7 +13,7 @@ export async function GET(
       .from('events')
       .select(`
         *,
-        profiles!organizer_id (
+        organizer:profiles!organizer_id (
           id,
           email,
           full_name
@@ -29,7 +29,13 @@ export async function GET(
       )
     }
 
-    return NextResponse.json({ event })
+    // Map start_date back to date for frontend compatibility
+    const formattedEvent = {
+      ...event,
+      date: event.start_date // Add date field for backward compatibility
+    }
+
+    return NextResponse.json({ event: formattedEvent })
   } catch (error) {
     console.error('Error fetching event:', error)
     return NextResponse.json(
@@ -73,9 +79,32 @@ export async function PUT(
 
     // Update event
     const body = await request.json()
+    
+    // Extract special fields from body
+    const { 
+      seat_config, 
+      ticket_template, 
+      date, // Extract date field
+      ...eventData 
+    } = body
+    
+    // Prepare update data with proper column mapping
+    const updateData: any = {
+      ...eventData,
+      ticket_template: ticket_template || null, // Include ticket_template as it's a column
+      updated_at: new Date().toISOString()
+    }
+    
+    // Map date to start_date if present
+    if (date !== undefined) {
+      updateData.start_date = date
+      updateData.end_date = date // Also update end_date to match
+    }
+    
+    // Update the main event data
     const { data: event, error: updateError } = await supabase
       .from('events')
-      .update(body)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single()
@@ -83,9 +112,42 @@ export async function PUT(
     if (updateError) {
       console.error('Error updating event:', updateError)
       return NextResponse.json(
-        { error: 'Failed to update event' },
+        { error: `Failed to update event: ${updateError.message}` },
         { status: 500 }
       )
+    }
+
+    // Handle seat configuration update if provided
+    if (seat_config && seat_config.enabled) {
+      // Check if seat config exists
+      const { data: existingSeatConfig } = await supabase
+        .from('event_seat_config')
+        .select('id')
+        .eq('event_id', id)
+        .single()
+
+      if (existingSeatConfig) {
+        // Update existing seat config
+        await supabase
+          .from('event_seat_config')
+          .update({
+            has_seat_allocation: seat_config.enabled,
+            total_seats: seat_config.totalSeats,
+            seat_layout_type: seat_config.layoutType,
+            updated_at: new Date().toISOString()
+          })
+          .eq('event_id', id)
+      } else {
+        // Create new seat config
+        await supabase
+          .from('event_seat_config')
+          .insert({
+            event_id: id,
+            has_seat_allocation: seat_config.enabled,
+            total_seats: seat_config.totalSeats,
+            seat_layout_type: seat_config.layoutType
+          })
+      }
     }
 
     return NextResponse.json({ event })

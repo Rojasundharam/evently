@@ -12,7 +12,7 @@ import {
   MapPin,
   Bell,
   Search,
-  Sparkles
+  CreditCard
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, formatPrice } from '@/lib/utils'
@@ -32,6 +32,7 @@ interface RecentEvent {
   venue: string
   image_url?: string
   price: number
+  category?: string
 }
 
 interface RecentBooking {
@@ -52,8 +53,6 @@ export default function DashboardHome() {
     id: string
     email?: string
   }
-  const [user, setUser] = useState<User | null>(null)
-  const [userRole, setUserRole] = useState<string>('user')
   const [stats, setStats] = useState<DashboardStats>({
     totalEvents: 0,
     myBookings: 0,
@@ -63,6 +62,8 @@ export default function DashboardHome() {
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([])
   const [recentBookings, setRecentBookings] = useState<RecentBooking[]>([])
   const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<any>(null)
+  const [userRole, setUserRole] = useState<string>('user')
 
   const supabase = createClient()
 
@@ -71,41 +72,31 @@ export default function DashboardHome() {
       try {
         console.log('🏠 Fetching dashboard data...')
         
-        // Get user
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        // Get session instead of user (faster)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
         
-        if (userError) {
-          console.error('❌ User fetch error:', userError)
+        if (sessionError || !session) {
+          console.log('📝 No session found')
           setLoading(false)
           return
         }
         
-        console.log('👤 User:', user ? 'Found' : 'Not found')
+        const user = session.user
+        console.log('👤 User:', user.email)
         setUser(user)
 
         if (user) {
-          // Get user role
+          // Get user role (with maybeSingle to avoid errors)
           console.log('📋 Fetching user profile...')
-          const { data: profile, error: profileError } = await supabase
+          const { data: profile } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', user.id)
-            .single()
-          
-          if (profileError) {
-            console.warn('⚠️ Profile fetch error:', profileError)
-          }
+            .maybeSingle()
           
           const userRole = profile?.role || 'user'
           console.log('🎭 User role:', userRole)
           setUserRole(userRole)
-          
-          // Redirect admin users to admin dashboard
-          if (userRole === 'admin') {
-            console.log('🔄 Redirecting admin to admin dashboard')
-            window.location.href = '/admin'
-            return
-          }
 
           // Fetch all data in parallel for better performance
           console.log('📊 Fetching dashboard data in parallel...')
@@ -122,10 +113,10 @@ export default function DashboardHome() {
               .select('total_amount')
               .eq('user_id', user.id),
             
-            // Get recent events
+            // Get recent events with category
             supabase
               .from('events')
-              .select('id, title, date, time, venue, image_url, price')
+              .select('id, title, date, time, venue, image_url, price, category')
               .eq('status', 'published')
               .order('created_at', { ascending: false })
               .limit(4),
@@ -201,9 +192,8 @@ export default function DashboardHome() {
 
     // Add timeout to prevent infinite loading
     const loadingTimeout = setTimeout(() => {
-      console.warn('⏰ Dashboard loading timeout - proceeding anyway')
       setLoading(false)
-    }, 8000) // 8 second timeout for slower connections
+    }, 10000) // 10 second timeout for slower connections
 
     fetchDashboardData().finally(() => {
       clearTimeout(loadingTimeout)
@@ -212,98 +202,95 @@ export default function DashboardHome() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0b6d41]"></div>
+      <div className="h-64 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#0b6d41] mx-auto mb-1"></div>
+          <p className="text-gray-600 text-xs">Loading...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Desktop-Only Header */}
-      <div className="bg-white shadow-sm border-b hidden lg:block">
-        <div className="px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                {user ? `Welcome back, ${user.email?.split('@')[0]}!` : 'Welcome to Evently'}
-              </h1>
-              <p className="text-gray-600 mt-2">
-                {user ? 'Here\'s what\'s happening with your events' : 'Discover amazing events near you'}
-              </p>
-              {userRole && (
-                <div className="flex items-center gap-2 mt-2">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    userRole === 'admin' ? 'bg-purple-100 text-purple-800' :
-                    userRole === 'organizer' ? 'bg-blue-100 text-blue-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>
-                    {userRole.charAt(0).toUpperCase() + userRole.slice(1)} Account
+    <div className="bg-gray-50">
+      {/* Compact Header */}
+      <div className="bg-white border-b">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-medium text-gray-900">
+                  {user ? `Welcome, ${user.email?.split('@')[0]}` : 'Welcome to Evently'}
+                </h1>
+                <p className="text-gray-600 text-sm mt-0.5">
+                  {user ? 'Event dashboard' : 'Discover events'}
+                </p>
+                {userRole && userRole !== 'user' && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#0b6d41]/10 text-[#0b6d41] mt-1">
+                    {userRole.charAt(0).toUpperCase() + userRole.slice(1)}
                   </span>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-4">
-              <button className="p-3 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-gray-100 transition-colors">
-                <Bell className="h-6 w-6" />
-              </button>
-              <button className="p-3 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-gray-100 transition-colors">
-                <Search className="h-6 w-6" />
-              </button>
+                )}
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button className="p-1.5 text-gray-400 hover:text-gray-600">
+                  <Bell className="h-4 w-4" />
+                </button>
+                <button className="p-1.5 text-gray-400 hover:text-gray-600">
+                  <Search className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="p-4 lg:p-6 max-w-7xl mx-auto">
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-6 lg:mb-8">
+      <div className="max-w-7xl mx-auto px-4 py-4">
+        {/* Compact Quick Actions */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <Link
             href="/events"
-            className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-100 group"
+            className="bg-white rounded-md p-3 hover:shadow-sm transition-shadow border border-gray-200 group"
           >
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center lg:flex-col lg:items-start gap-3 lg:gap-0">
-                <Calendar className="h-6 w-6 lg:h-8 lg:w-8 text-[#0b6d41] lg:mb-3 flex-shrink-0" />
-                <div>
-                  <h3 className="font-semibold text-gray-900 text-sm lg:text-base">Browse Events</h3>
-                  <p className="text-xs lg:text-sm text-gray-600 mt-0 lg:mt-1">Find events</p>
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-[#ffde59]/20 rounded-md flex items-center justify-center group-hover:bg-[#ffde59]/30 transition-colors">
+                <Calendar className="h-4 w-4 text-[#0b6d41]" />
               </div>
-              <ArrowRight className="h-4 w-4 lg:h-5 lg:w-5 text-gray-400 group-hover:text-[#0b6d41] transition-colors self-end lg:self-auto mt-2 lg:mt-0" />
+              <div>
+                <h3 className="font-medium text-gray-900 text-sm">Browse Events</h3>
+                <p className="text-xs text-gray-500">Find events</p>
+              </div>
             </div>
           </Link>
 
           <Link
             href="/bookings"
-            className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-100 group"
+            className="bg-white rounded-md p-3 hover:shadow-sm transition-shadow border border-gray-200 group"
           >
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center lg:flex-col lg:items-start gap-3 lg:gap-0">
-                <Ticket className="h-6 w-6 lg:h-8 lg:w-8 text-blue-600 lg:mb-3 flex-shrink-0" />
-                <div>
-                  <h3 className="font-semibold text-gray-900 text-sm lg:text-base">My Bookings</h3>
-                  <p className="text-xs lg:text-sm text-gray-600 mt-0 lg:mt-1">View tickets</p>
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-[#0b6d41]/10 rounded-md flex items-center justify-center group-hover:bg-[#0b6d41]/20 transition-colors">
+                <Ticket className="h-4 w-4 text-[#0b6d41]" />
               </div>
-              <ArrowRight className="h-4 w-4 lg:h-5 lg:w-5 text-gray-400 group-hover:text-blue-600 transition-colors self-end lg:self-auto mt-2 lg:mt-0" />
+              <div>
+                <h3 className="font-medium text-gray-900 text-sm">My Bookings</h3>
+                <p className="text-xs text-gray-500">View tickets</p>
+              </div>
             </div>
           </Link>
 
           {(userRole === 'organizer' || userRole === 'admin') && (
             <Link
               href="/events/create"
-              className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-100 group"
+              className="bg-white rounded-md p-3 hover:shadow-sm transition-shadow border border-gray-200 group"
             >
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center lg:flex-col lg:items-start gap-3 lg:gap-0">
-                  <Plus className="h-6 w-6 lg:h-8 lg:w-8 text-green-600 lg:mb-3 flex-shrink-0" />
-                  <div>
-                    <h3 className="font-semibold text-gray-900 text-sm lg:text-base">Create Event</h3>
-                    <p className="text-xs lg:text-sm text-gray-600 mt-0 lg:mt-1">Host event</p>
-                  </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-[#ffde59]/20 rounded-md flex items-center justify-center group-hover:bg-[#ffde59]/30 transition-colors">
+                  <Plus className="h-4 w-4 text-[#0b6d41]" />
                 </div>
-                <ArrowRight className="h-4 w-4 lg:h-5 lg:w-5 text-gray-400 group-hover:text-green-600 transition-colors self-end lg:self-auto mt-2 lg:mt-0" />
+                <div>
+                  <h3 className="font-medium text-gray-900 text-sm">Create Event</h3>
+                  <p className="text-xs text-gray-500">Host event</p>
+                </div>
               </div>
             </Link>
           )}
@@ -311,202 +298,203 @@ export default function DashboardHome() {
           {userRole === 'admin' && (
             <Link
               href="/admin/analytics"
-              className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-100 group"
+              className="bg-white rounded-md p-3 hover:shadow-sm transition-shadow border border-gray-200 group"
             >
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center lg:flex-col lg:items-start gap-3 lg:gap-0">
-                  <TrendingUp className="h-6 w-6 lg:h-8 lg:w-8 text-purple-600 lg:mb-3 flex-shrink-0" />
-                  <div>
-                    <h3 className="font-semibold text-gray-900 text-sm lg:text-base">Analytics</h3>
-                    <p className="text-xs lg:text-sm text-gray-600 mt-0 lg:mt-1">View stats</p>
-                  </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-[#0b6d41]/10 rounded-md flex items-center justify-center group-hover:bg-[#0b6d41]/20 transition-colors">
+                  <TrendingUp className="h-4 w-4 text-[#0b6d41]" />
                 </div>
-                <ArrowRight className="h-4 w-4 lg:h-5 lg:w-5 text-gray-400 group-hover:text-purple-600 transition-colors self-end lg:self-auto mt-2 lg:mt-0" />
+                <div>
+                  <h3 className="font-medium text-gray-900 text-sm">Analytics</h3>
+                  <p className="text-xs text-gray-500">View stats</p>
+                </div>
               </div>
             </Link>
           )}
         </div>
 
-        {/* Stats Cards */}
+        {/* Compact Stats Cards */}
         {user && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6 mb-6 lg:mb-8">
-            <div className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm border border-gray-100">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="bg-white rounded-md p-3 border border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs lg:text-sm font-medium text-gray-600">Total Events</p>
-                  <p className="text-xl lg:text-3xl font-bold text-gray-900 mt-1 lg:mt-2">{stats.totalEvents}</p>
+                  <p className="text-xs text-gray-600">Total Events</p>
+                  <p className="text-lg font-semibold text-gray-900">{stats.totalEvents}</p>
                 </div>
-                <div className="bg-[#0b6d41]/10 p-2 lg:p-2.5 rounded-xl">
-                  <Calendar className="h-5 w-5 lg:h-6 lg:w-6 text-[#0b6d41]" />
-                </div>
+                <Calendar className="h-4 w-4 text-[#0b6d41]" />
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-md p-3 border border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs lg:text-sm font-medium text-gray-600">My Bookings</p>
-                  <p className="text-xl lg:text-3xl font-bold text-gray-900 mt-1 lg:mt-2">{stats.myBookings}</p>
+                  <p className="text-xs text-gray-600">My Bookings</p>
+                  <p className="text-lg font-semibold text-gray-900">{stats.myBookings}</p>
                 </div>
-                <div className="bg-blue-600/10 p-2 lg:p-2.5 rounded-xl">
-                  <Ticket className="h-5 w-5 lg:h-6 lg:w-6 text-blue-600" />
-                </div>
+                <Ticket className="h-4 w-4 text-[#0b6d41]" />
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-md p-3 border border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs lg:text-sm font-medium text-gray-600">Upcoming</p>
-                  <p className="text-xl lg:text-3xl font-bold text-gray-900 mt-1 lg:mt-2">{stats.upcomingEvents}</p>
+                  <p className="text-xs text-gray-600">Upcoming</p>
+                  <p className="text-lg font-semibold text-gray-900">{stats.upcomingEvents}</p>
                 </div>
-                <div className="bg-orange-600/10 p-2 lg:p-2.5 rounded-xl">
-                  <Clock className="h-5 w-5 lg:h-6 lg:w-6 text-orange-600" />
-                </div>
+                <Clock className="h-4 w-4 text-[#ffde59]" />
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-md p-3 border border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs lg:text-sm font-medium text-gray-600">Total Spent</p>
-                  <p className="text-xl lg:text-3xl font-bold text-gray-900 mt-1 lg:mt-2">₹{formatPrice(stats.totalSpent)}</p>
+                  <p className="text-xs text-gray-600">Total Spent</p>
+                  <p className="text-lg font-semibold text-gray-900">₹{formatPrice(stats.totalSpent)}</p>
                 </div>
-                <div className="bg-green-600/10 p-2 lg:p-2.5 rounded-xl">
-                  <TrendingUp className="h-5 w-5 lg:h-6 lg:w-6 text-green-600" />
-                </div>
+                <CreditCard className="h-4 w-4 text-[#0b6d41]" />
               </div>
             </div>
           </div>
         )}
 
-        <div className="grid lg:grid-cols-2 gap-6 lg:gap-8">
-          {/* Recent Events */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="p-4 lg:p-6 border-b border-gray-100">
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Compact Recent Events */}
+          <div className="bg-white rounded-md border border-gray-200">
+            <div className="p-3 border-b border-gray-100">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg lg:text-xl font-semibold text-gray-900">Recent Events</h2>
+                <h2 className="font-medium text-gray-900">Recent Events</h2>
                 <Link
                   href="/events"
-                  className="text-[#0b6d41] hover:text-[#0a5d37] font-medium text-xs lg:text-sm flex items-center gap-1"
+                  className="text-[#0b6d41] hover:text-[#0a5d37] text-xs font-medium flex items-center gap-1"
                 >
                   View all
-                  <ArrowRight className="h-3 w-3 lg:h-4 lg:w-4" />
+                  <ArrowRight className="h-3 w-3" />
                 </Link>
               </div>
             </div>
-            <div className="p-4 lg:p-6">
-              <div className="space-y-4">
-                {recentEvents.map((event) => (
+            
+            <div className="divide-y divide-gray-100">
+              {recentEvents.length > 0 ? (
+                recentEvents.map((event) => (
                   <Link
                     key={event.id}
                     href={`/events/${event.id}`}
-                    className="flex items-center gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors group"
+                    className="flex items-center gap-3 p-3 hover:bg-gray-50 transition-colors"
                   >
-                    <div className="w-16 h-16 bg-gradient-to-br from-[#0b6d41] to-[#ffde59] rounded-xl flex items-center justify-center">
+                    {/* Small image or icon */}
+                    <div className="w-8 h-8 rounded-md overflow-hidden bg-[#ffde59]/10 flex-shrink-0">
                       {event.image_url ? (
                         <img
                           src={event.image_url}
                           alt={event.title}
-                          className="w-full h-full object-cover rounded-xl"
+                          className="w-full h-full object-cover"
                         />
                       ) : (
-                        <Calendar className="h-8 w-8 text-white" />
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Calendar className="h-4 w-4 text-[#0b6d41]" />
+                        </div>
                       )}
                     </div>
+                    
+                    {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 truncate group-hover:text-[#0b6d41] transition-colors">
+                      <h3 className="font-medium text-gray-900 truncate text-sm">
                         {event.title}
                       </h3>
-                      <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
                         <span className="flex items-center gap-1">
-                          <Clock className="h-4 w-4" />
+                          <Clock className="h-3 w-3" />
                           {formatDate(event.date)}
                         </span>
                         <span className="flex items-center gap-1">
-                          <MapPin className="h-4 w-4" />
+                          <MapPin className="h-3 w-3" />
                           {event.venue}
                         </span>
                       </div>
                     </div>
+                    
+                    {/* Price */}
                     <div className="text-right">
-                      <p className="font-semibold text-gray-900">{formatPrice(event.price)}</p>
+                      <p className="font-semibold text-[#0b6d41] text-sm">₹{formatPrice(event.price)}</p>
                     </div>
                   </Link>
-                ))}
-              </div>
+                ))
+              ) : (
+                <div className="p-6 text-center">
+                  <Calendar className="h-6 w-6 text-gray-300 mx-auto mb-2" />
+                  <p className="text-gray-500 text-sm">No events available</p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Recent Bookings */}
+          {/* Compact Recent Bookings */}
           {user && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-              <div className="p-6 border-b border-gray-100">
+            <div className="bg-white rounded-md border border-gray-200">
+              <div className="p-3 border-b border-gray-100">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-semibold text-gray-900">My Recent Bookings</h2>
+                  <h2 className="font-medium text-gray-900">My Recent Bookings</h2>
                   <Link
                     href="/bookings"
-                    className="text-[#0b6d41] hover:text-[#0a5d37] font-medium text-sm flex items-center gap-1"
+                    className="text-[#0b6d41] hover:text-[#0a5d37] text-xs font-medium flex items-center gap-1"
                   >
                     View all
-                    <ArrowRight className="h-4 w-4" />
+                    <ArrowRight className="h-3 w-3" />
                   </Link>
                 </div>
               </div>
-              <div className="p-6">
-                <div className="space-y-4">
-                  {recentBookings.length > 0 ? (
-                    recentBookings.map((booking) => (
-                      <div
-                        key={booking.id}
-                        className="flex items-center gap-4 p-4 rounded-xl bg-gray-50"
-                      >
-                        <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
-                          {booking.event?.image_url ? (
-                            <img
-                              src={booking.event.image_url}
-                              alt={booking.event.title}
-                              className="w-full h-full object-cover rounded-xl"
-                            />
-                          ) : (
-                            <Ticket className="h-8 w-8 text-white" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900 truncate">
-                            {booking.event?.title}
-                          </h3>
-                          <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
-                            <span>{booking.quantity} ticket{booking.quantity > 1 ? 's' : ''}</span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              booking.payment_status === 'completed'
-                                ? 'bg-green-100 text-green-800'
-                                : booking.payment_status === 'pending'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-red-100 text-red-800'
-                            }`}>
-                              {booking.payment_status}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-gray-900">{formatPrice(booking.total_amount)}</p>
+              
+              <div className="divide-y divide-gray-100">
+                {recentBookings.length > 0 ? (
+                  recentBookings.map((booking) => (
+                    <div
+                      key={booking.id}
+                      className="flex items-center gap-3 p-3"
+                    >
+                      {/* Small icon */}
+                      <div className="w-8 h-8 rounded-md bg-[#0b6d41]/10 flex items-center justify-center flex-shrink-0">
+                        <Ticket className="h-4 w-4 text-[#0b6d41]" />
+                      </div>
+                      
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-gray-900 truncate text-sm">
+                          {booking.event?.title}
+                        </h3>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
+                          <span>{booking.quantity} ticket{booking.quantity > 1 ? 's' : ''}</span>
+                          <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                            booking.payment_status === 'completed'
+                              ? 'bg-green-100 text-green-700'
+                              : booking.payment_status === 'pending'
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {booking.payment_status}
+                          </span>
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8">
-                      <Ticket className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-600">No bookings yet</p>
-                      <Link
-                        href="/events"
-                        className="text-[#0b6d41] hover:text-[#0a5d37] font-medium text-sm mt-2 inline-block"
-                      >
-                        Browse events to get started
-                      </Link>
+                      
+                      {/* Amount */}
+                      <div className="text-right">
+                        <p className="font-semibold text-gray-900 text-sm">₹{formatPrice(booking.total_amount)}</p>
+                      </div>
                     </div>
-                  )}
-                </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center">
+                    <Ticket className="h-6 w-6 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm mb-2">No bookings yet</p>
+                    <Link
+                      href="/events"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0b6d41] text-white rounded-md hover:bg-[#0a5d37] transition-colors text-sm"
+                    >
+                      Browse Events
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
           )}

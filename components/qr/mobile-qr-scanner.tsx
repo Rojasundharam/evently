@@ -76,10 +76,11 @@ export default function MobileQRScanner({ eventId, eventTitle, onScanResult }: M
       const config = {
         fps: 10,
         qrbox: { 
-          width: Math.min(300, window.innerWidth * 0.8), 
-          height: Math.min(300, window.innerWidth * 0.8) 
+          width: Math.min(350, window.innerWidth * 0.85), // Increased from 300 for better detection
+          height: Math.min(350, window.innerWidth * 0.85) 
         },
-        aspectRatio: 1.0
+        aspectRatio: 1.0,
+        supportedScanTypes: [0, 1] // QR Code and Data Matrix for broader compatibility
       }
 
       await html5QrCode.start(
@@ -145,15 +146,26 @@ export default function MobileQRScanner({ eventId, eventTitle, onScanResult }: M
 
   const handleScan = async (qrCode: string) => {
     try {
-      const response = await fetch('/api/tickets/validate', {
+      // Support both encrypted QR codes and simple URL formats
+      let apiEndpoint = '/api/tickets/validate'
+      let requestBody: any = { qrCode, eventId }
+
+      // Check if it's a simple URL format (like /verify/ticket/TICKET_NUMBER)
+      if (qrCode.includes('/verify/ticket/') || qrCode.includes('verify/ticket/')) {
+        // Extract ticket number from URL and use verify-simple API
+        const ticketNumberMatch = qrCode.match(/verify\/ticket\/([^?&]+)/)
+        if (ticketNumberMatch) {
+          apiEndpoint = '/api/tickets/verify-simple'
+          requestBody = { qrData: qrCode }
+        }
+      }
+
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          qrCode,
-          eventId
-        })
+        body: JSON.stringify(requestBody)
       })
 
       const result: ScanResult = await response.json()
